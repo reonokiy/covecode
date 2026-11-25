@@ -1,4 +1,4 @@
-import { isAllowedLoopbackHost } from "@t3tools/libp2p-tunnel";
+import { isAllowedLoopbackHost } from "@covecode/libp2p-tunnel";
 import type {
   RelayManagedEndpoint,
   RelayManagedEndpointOrigin,

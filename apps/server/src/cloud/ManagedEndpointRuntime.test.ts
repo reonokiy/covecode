@@ -6,7 +6,7 @@ import {
   type EnvironmentLibp2pTunnel,
   type EnvironmentLibp2pTunnelOptions,
   TunnelRegistrationUnauthorizedError,
-} from "@t3tools/libp2p-tunnel";
+} from "@covecode/libp2p-tunnel";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

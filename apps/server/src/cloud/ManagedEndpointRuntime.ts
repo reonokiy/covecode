@@ -9,7 +9,7 @@ import {
   type EnvironmentLibp2pTunnelOptions,
   type EnvironmentTunnelStatusEvent,
   TunnelRegistrationUnauthorizedError,
-} from "@t3tools/libp2p-tunnel";
+} from "@covecode/libp2p-tunnel";
 import { RotatingFileSink, RotatingFileSinkError } from "@t3tools/shared/logging";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Context from "effect/Context";

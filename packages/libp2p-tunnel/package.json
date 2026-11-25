@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/libp2p-tunnel",
+  "name": "@covecode/libp2p-tunnel",
   "private": true,
   "type": "module",
   "exports": {

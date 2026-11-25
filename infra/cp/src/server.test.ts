@@ -7,7 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "@effect/vitest";
-import { createEnvironmentLibp2pTunnel } from "@t3tools/libp2p-tunnel";
+import { createEnvironmentLibp2pTunnel } from "@covecode/libp2p-tunnel";
 import * as PgDrizzle from "drizzle-orm/effect-postgres";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

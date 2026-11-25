@@ -131,7 +131,19 @@ describe("third-party license generation", () => {
 
   it("collects production packages and custom asset notices", async () => {
     const fixture = await createFixture();
+    const internalManifest = NodePath.join(
+      fixture.root,
+      "node_modules/@covecode/internal/package.json",
+    );
+    await writeJson(fixture.appManifest, { dependencies: { "@covecode/internal": "workspace:*" } });
+    await writeJson(internalManifest, {
+      name: "@covecode/internal",
+      version: "1.0.0",
+      dependencies: { "demo-dependency": "1.2.3" },
+    });
     const manifest = await generateThirdPartyLicenseManifest({
+      bundleName: "web",
+      bundledModuleIds: [internalManifest],
       configFile: fixture.configFile,
       packageManifests: [{ bundle: "web", path: fixture.appManifest }],
     });

@@ -15,8 +15,8 @@ Neither path depends on the connected environment or an RPC.
 ## What the build collects
 
 The generator follows installed production and optional dependencies, including dependencies of
-workspace packages, and omits first-party `@t3tools/*` packages. The web manifest starts from the
-web, server, and desktop package manifests. The mobile manifest starts from the mobile package
+workspace packages, and omits first-party `@t3tools/*` and `@covecode/*` packages. The web manifest
+starts from the web, server, and desktop package manifests. The mobile manifest starts from the mobile package
 manifest. During the web bundle, the generator also checks emitted module ids to catch a bundled
 npm import missing from a package manifest.
 
@@ -97,6 +97,11 @@ several packages from one monorepo share the same notice:
 The generator also reuses an installed sibling package's notice when both packages declare the
 same normalized repository and license. A name-and-version override always wins over these
 repository fallbacks.
+
+The libp2p dependency overrides are pinned to the npm versions whose archives omit their notices.
+They share the [upstream MIT text](https://github.com/libp2p/js-libp2p/blob/53e0e8993a82ab3e967fdb0ed07f3e4e47abb966/LICENSE-MIT)
+and [Apache 2.0 terms](https://github.com/libp2p/js-libp2p/blob/53e0e8993a82ab3e967fdb0ed07f3e4e47abb966/LICENSE-APACHE).
+Check the new release's archive and source notices before extending an override.
 
 The `@react-grab/cli` override uses the root React Grab repository's MIT license because the CLI's
 npm archive omits both its license field and license file. Keep the override until the published

@@ -9,7 +9,7 @@ import {
   type HttpProxyOptions,
   type RelayLibp2pNode,
   type RelayRegisteredEndpoint,
-} from "@t3tools/libp2p-tunnel";
+} from "@covecode/libp2p-tunnel";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";

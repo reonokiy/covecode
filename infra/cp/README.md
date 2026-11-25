@@ -6,7 +6,7 @@
 
 - **Standard OIDC authentication**: Verifies user Bearer JWTs against any OpenID Connect provider via `.well-known/openid-configuration` discovery and JWKS (Keycloak, Authentik, Authelia, Dex, ZITADEL, Auth0, Okta, Google, etc.), and advertises OIDC configuration at `GET /.well-known/cove-control-plane`.
 - **PostgreSQL storage**: Persists environment links, DPoP replay nonces, managed tunnel allocations, mobile devices, and agent activity state using Drizzle ORM (`infra/cp/migrations/postgres/`).
-- **libp2p v3 tunnel & P2P gateway**: Hosts an in-process `js-libp2p` relay + circuit-relay + HTTP/WS stream bridge (`@t3tools/libp2p-tunnel`) replacing legacy tunnel daemons. Traffic reaches environments via `/t/<endpointKey>/...` on a single host/IP or optional wildcard subdomains (`COVE_CP_TUNNEL_BASE_DOMAIN`).
+- **libp2p v3 tunnel & P2P gateway**: Hosts an in-process `js-libp2p` relay + circuit-relay + HTTP/WS stream bridge (`@covecode/libp2p-tunnel`) replacing legacy tunnel daemons. Traffic reaches environments via `/t/<endpointKey>/...` on a single host/IP or optional wildcard subdomains (`COVE_CP_TUNNEL_BASE_DOMAIN`).
 - **Offline webhook inbox & optional push notifications**: In-process webhook buffering while environments reconnect, plus optional APNs and FCM workers when configured.
 - **No third-party telemetry**: Mobile telemetry ingestion is disabled by default.
 

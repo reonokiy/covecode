@@ -11,13 +11,13 @@
     "typecheck": "effect-tsgo tsrs --noEmit"
   },
   "dependencies": {
+    "@covecode/libp2p-tunnel": "workspace:*",
     "@effect/platform-node": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
-    "@t3tools/libp2p-tunnel": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "drizzle-orm": "1.0.0-rc.5",
     "effect": "catalog:"
