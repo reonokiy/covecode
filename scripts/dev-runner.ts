@@ -26,7 +26,7 @@ import { loadRepoEnv } from "./lib/public-config.ts";
 
 Object.assign(process.env, loadRepoEnv());
 
-const BASE_SERVER_PORT = 13773;
+const BASE_SERVER_PORT = 13774;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
@@ -68,7 +68,7 @@ function sharedBackendTargetHost(host: string | undefined): string {
 }
 
 export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(NodeOS.homedir(), ".t3"),
+  path.join(NodeOS.homedir(), ".cove"),
 );
 
 const MODE_ARGS = {
@@ -330,9 +330,9 @@ export const createDevRunnerEnv = Effect.fn("dev-runner.createDevRunnerEnv")(fun
   };
 
   const path = yield* Path.Path;
-  // The server stores an explicit home's state in userdata, which for ~/.t3 is the live
-  // install. Left implicit, dev state goes to ~/.t3/dev.
-  const isLiveHome = resolvedBaseDir === path.join(yield* HostProcess.HomeDirectory, ".t3");
+  // The server stores an explicit home's state in userdata, which for ~/.cove is the live
+  // install. Left implicit, dev state goes to ~/.cove/dev.
+  const isLiveHome = resolvedBaseDir === path.join(yield* HostProcess.HomeDirectory, ".cove");
   if (configuredBaseDir !== undefined && !isLiveHome) {
     output.T3CODE_HOME = resolvedBaseDir;
   } else {
@@ -643,7 +643,12 @@ const prepareFirstStart = Effect.fn("dev-runner.prepareFirstStart")(function* (i
         );
       }
     }
-    const source = path.join(yield* HostProcess.HomeDirectory, ".t3", "userdata", "statev2.sqlite");
+    const source = path.join(
+      yield* HostProcess.HomeDirectory,
+      ".cove",
+      "userdata",
+      "statev2.sqlite",
+    );
     // A V1 state.sqlite counts as data too: the server imports it only while
     // statev2.sqlite is missing, so seeding would hide it.
     if (
@@ -970,7 +975,7 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   t3Home: Flag.String("home-dir").pipe(
     Flag.withDescription(
-      "Explicit T3 Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME). Inside a git worktree this defaults to that worktree's own .t3 so dev state stays off the shared home.",
+      "Explicit Cove Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME). Inside a git worktree this defaults to that worktree's own .t3 so dev state stays off the shared home.",
     ),
     Flag.optional,
     Flag.map(Option.getOrUndefined),

@@ -60,7 +60,7 @@ export function pinnedRuntimePaths(
   const versionDir = path.join(pinnedRuntimeVersionsDir(path, baseDir), version);
   return {
     versionDir,
-    entryPath: path.join(versionDir, platform === "win32" ? "t3.exe" : "t3"),
+    entryPath: path.join(versionDir, platform === "win32" ? "cove.exe" : "cove"),
     sentinelPath: path.join(versionDir, ".install-complete"),
   };
 }
@@ -571,8 +571,8 @@ export function isVersionExecutable(
   candidate: string,
 ): boolean {
   const relative = path.relative(versionsDir, path.resolve(candidate));
-  // On another Windows drive, relative() returns the absolute path, like `D:\t3.exe`.
-  return !path.isAbsolute(relative) && /^(?!\.\.)[^\\/]+[\\/]t3(?:\.exe)?$/i.test(relative);
+  // On another Windows drive, relative() returns the absolute path, like `D:\cove.exe`.
+  return !path.isAbsolute(relative) && /^(?!\.\.)[^\\/]+[\\/]cove(?:\.exe)?$/i.test(relative);
 }
 
 /** The executable a `t3.cmd` shim written by the install script or `t3 update` runs. */
@@ -636,15 +636,15 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
       .pipe(Effect.orElseSucceed(() => ""));
     const cwd = yield* HostProcess.WorkingDirectory;
     const candidates = [
-      // PATH first, resolved like the shell does: it decides which t3 the user runs.
+      // PATH first, resolved like the shell does: it decides which cove the user runs.
       ...(environment["PATH"] ?? "")
         .split(":")
         .filter((directory) => directory.length > 0)
-        .map((directory) => path.resolve(cwd, directory, "t3")),
+        .map((directory) => path.resolve(cwd, directory, "cove")),
       path.join(
         environment["T3CODE_INSTALL_BIN_DIR"] ||
           path.join(yield* HostProcess.HomeDirectory, ".local", "bin"),
-        "t3",
+        "cove",
       ),
       ...recorded.split(/\r?\n/),
     ].filter((candidate) => path.isAbsolute(candidate));
@@ -692,7 +692,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
   const platform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
   const home = yield* HostProcess.HomeDirectory;
-  const launcherName = platform === "win32" ? "t3.cmd" : "t3";
+  const launcherName = platform === "win32" ? "cove.cmd" : "cove";
   const launchersFile = path.join(baseDir, PINNED_RUNTIME_DIR, PINNED_RUNTIME_LAUNCHERS_FILE);
   const recorded = (yield* fs.readFileString(launchersFile).pipe(Effect.orElseSucceed(() => "")))
     .split(/\r?\n/)

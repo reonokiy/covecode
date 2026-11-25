@@ -30,7 +30,7 @@ import {
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
 const version = "1.2.3";
-const archiveName = `t3-${version}-linux-x64.tar.gz`;
+const archiveName = `cove-${version}-linux-x64.tar.gz`;
 const archiveBytes = new TextEncoder().encode("not really a tarball");
 const archiveHex = (bytes: Uint8Array) =>
   Effect.promise(() => crypto.subtle.digest("SHA-256", bytes)).pipe(
@@ -57,7 +57,7 @@ const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: 
         if (input.command !== "tar" || stagingDir === undefined) {
           return yield* Effect.die(`unexpected command ${input.command}`);
         }
-        yield* fs.writeFileString(path.join(stagingDir, "t3"), "#!/bin/sh\n").pipe(Effect.orDie);
+        yield* fs.writeFileString(path.join(stagingDir, "cove"), "#!/bin/sh\n").pipe(Effect.orDie);
         return {
           stdout: "",
           stderr: "",
@@ -95,7 +95,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
             Effect.orDie,
           ),
       });
-      assert.equal(paths.entryPath, path.join(paths.versionDir, "t3"));
+      assert.equal(paths.entryPath, path.join(paths.versionDir, "cove"));
       assert.deepEqual(pinnedRuntimeCommand(paths), { command: paths.entryPath, args: [] });
       assert.deepEqual(requests, [
         `https://releases.example/download/v${version}/SHA256SUMS`,
@@ -597,12 +597,14 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
   );
 });
 
-it("isVersionExecutable accepts only <version>/t3, never another drive or program", () => {
+it("isVersionExecutable accepts only <version>/cove, never another drive or program", () => {
   const win32 = NodePath.win32 as unknown as Path.Path;
-  assert.isTrue(isVersionExecutable(win32, "C:\\t3\\versions", "C:\\t3\\versions\\1.0.0\\t3.exe"));
-  assert.isFalse(isVersionExecutable(win32, "C:\\t3\\versions", "D:\\t3.exe"));
+  assert.isTrue(
+    isVersionExecutable(win32, "C:\\cove\\versions", "C:\\cove\\versions\\1.0.0\\cove.exe"),
+  );
+  assert.isFalse(isVersionExecutable(win32, "C:\\cove\\versions", "D:\\cove.exe"));
   assert.isFalse(
-    isVersionExecutable(win32, "C:\\t3\\versions", "C:\\t3\\versions\\1.0.0\\node.exe"),
+    isVersionExecutable(win32, "C:\\cove\\versions", "C:\\cove\\versions\\1.0.0\\node.exe"),
   );
 });
 
@@ -635,7 +637,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
     ) {
       const directory = path.join(versionsDir, version);
       yield* fs.makeDirectory(directory, { recursive: true });
-      yield* fs.writeFileString(path.join(directory, "t3"), "");
+      yield* fs.writeFileString(path.join(directory, "cove"), "");
       if (completed === "never") return;
       const sentinel = path.join(directory, ".install-complete");
       yield* fs.writeFileString(sentinel, `${version}\n`);
@@ -674,12 +676,12 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       yield* fs.makeDirectory(binDir);
       yield* fs.makeDirectory(customBinDir);
       // Chained: the launcher reaches its runtime through a second link.
-      yield* fs.symlink(path.join(versionsDir, "1.2.0", "t3"), path.join(baseDir, "alias-t3"));
-      yield* fs.symlink(path.join(baseDir, "alias-t3"), path.join(binDir, "t3"));
-      yield* fs.symlink(path.join(versionsDir, "1.2.5", "t3"), path.join(customBinDir, "t3"));
+      yield* fs.symlink(path.join(versionsDir, "1.2.0", "cove"), path.join(baseDir, "alias-cove"));
+      yield* fs.symlink(path.join(baseDir, "alias-cove"), path.join(binDir, "cove"));
+      yield* fs.symlink(path.join(versionsDir, "1.2.5", "cove"), path.join(customBinDir, "cove"));
       yield* fs.writeFileString(
         path.join(baseDir, "runtime", "launchers"),
-        `${path.join(customBinDir, "t3")}\n`,
+        `${path.join(customBinDir, "cove")}\n`,
       );
       yield* fs.writeFileString(
         path.join(baseDir, "runtime", "service-state.json"),
@@ -693,11 +695,11 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const removed = yield* prunePinnedRuntimes({
         baseDir,
         keep: ["2.0.0"],
-        references: [`ExecStart=${path.join(versionsDir, "1.3.5", "t3")} __service-launcher`],
+        references: [`ExecStart=${path.join(versionsDir, "1.3.5", "cove")} __service-launcher`],
       }).pipe(
         Effect.provideService(
           ProcessRunner.ProcessRunner,
-          lsofRunner(`p42\nftxt\nn${path.join(versionsDir, "1.3.0", "t3")}\n`),
+          lsofRunner(`p42\nftxt\nn${path.join(versionsDir, "1.3.0", "cove")}\n`),
         ),
         Effect.provideService(HostProcess.Platform, "darwin"),
         Effect.provideService(HostProcess.Environment, { T3CODE_INSTALL_BIN_DIR: binDir }),
@@ -710,7 +712,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       // The launcher found on PATH is remembered for a service that cannot see it.
       assert.equal(
         yield* fs.readFileString(path.join(baseDir, "runtime", "launchers")),
-        `${path.join(customBinDir, "t3")}\n\n${path.join(binDir, "t3")}\n`,
+        `${path.join(customBinDir, "cove")}\n\n${path.join(binDir, "cove")}\n`,
       );
       assert.deepEqual((yield* fs.readDirectory(versionsDir)).toSorted(), [
         ".staging-abc",
@@ -750,12 +752,12 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
       const binDir = path.join(baseDir, "bin");
       yield* fs.makeDirectory(binDir);
-      yield* fs.symlink(path.join(versionsDir, "1.1.0", "t3"), path.join(binDir, "t3"));
+      yield* fs.symlink(path.join(versionsDir, "1.1.0", "cove"), path.join(binDir, "cove"));
       const ownDir = path.join(versionsDir, "1.0.0");
       if (recorded) {
         yield* fs.writeFileString(
           path.join(baseDir, "runtime", "launchers"),
-          `${path.join(ownDir, "t3")}\n`,
+          `${path.join(ownDir, "cove")}\n`,
         );
       }
 
@@ -797,10 +799,10 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
         // The installer accepts any bin directory, including one under the versions directory.
         const binDir = path.join(versionsDir, "bin");
         yield* fs.makeDirectory(binDir);
-        yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(binDir, "t3"));
+        yield* fs.symlink(path.join(versionsDir, "1.0.0", "cove"), path.join(binDir, "cove"));
         yield* fs.writeFileString(
           path.join(baseDir, "runtime", "launchers"),
-          `${path.join(binDir, "t3")}\n`,
+          `${path.join(binDir, "cove")}\n`,
         );
       } else {
         const linkedDir = path.join(via === "linked dir" ? baseDir : versionsDir, "current");
@@ -832,7 +834,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
       const binDir = path.join(baseDir, "custom-bin");
       yield* fs.makeDirectory(binDir);
-      yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(binDir, "t3"));
+      yield* fs.symlink(path.join(versionsDir, "1.0.0", "cove"), path.join(binDir, "cove"));
       const launchersFile = path.join(baseDir, "runtime", "launchers");
       yield* fs.writeFileString(launchersFile, recorded);
       const prune = (environment: Record<string, string>) =>
@@ -862,7 +864,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const removed = yield* prune({});
 
       assert.deepEqual(removed, []);
-      assert.isTrue(yield* fs.exists(path.join(versionsDir, "1.0.0", "t3")));
+      assert.isTrue(yield* fs.exists(path.join(versionsDir, "1.0.0", "cove")));
     }),
   );
 
@@ -871,10 +873,10 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
-      const shim = path.join(baseDir, "t3.cmd");
+      const shim = path.join(baseDir, "cove.cmd");
       yield* fs.writeFileString(
         shim,
-        `@echo off\r\n"${path.join(versionsDir, "1.0.0", "t3.exe").toUpperCase()}" %*`,
+        `@echo off\r\n"${path.join(versionsDir, "1.0.0", "cove.exe").toUpperCase()}" %*`,
       );
       yield* fs.writeFileString(path.join(baseDir, "runtime", "launchers"), `${shim}\n`);
 

@@ -75,7 +75,7 @@ const startBesideBootService = Effect.fn("test.startBesideBootService")(function
   const [unitPath, unit] =
     input.platform === "darwin"
       ? [
-          path.join(root, "Library", "LaunchAgents", "com.t3tools.t3code.service.plist"),
+          path.join(root, "Library", "LaunchAgents", "net.nokiy.cove.service.plist"),
           renderBootServicePlist(plan, { homeDir: root, environmentPath: "" }),
         ]
       : [
@@ -339,7 +339,7 @@ describe("server ownership", () => {
               "launchctl print": { code: 113 },
               "launchctl print-disabled": {
                 code: 0,
-                stdout: '"com.t3tools.t3code.service" => false',
+                stdout: '"net.nokiy.cove.service" => false',
               },
             },
           },
@@ -452,7 +452,7 @@ describe("server ownership", () => {
               "launchctl print": { code: 113 },
               "launchctl print-disabled": {
                 code: 0,
-                stdout: '"com.t3tools.t3code.service" => disabled',
+                stdout: '"net.nokiy.cove.service" => disabled',
               },
             },
           },

@@ -88,15 +88,16 @@ export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(funct
     const body = yield* httpClient.execute(authenticatedRequest).pipe(
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap((response) => response.text),
-      Effect.mapError(() => new CliUpdateError({ reason: "Could not list t3 releases." })),
+      Effect.mapError(() => new CliUpdateError({ reason: "Could not list cove releases." })),
       Effect.timeoutOrElse({
         duration: RELEASE_INDEX_TIMEOUT,
-        orElse: () => Effect.fail(new CliUpdateError({ reason: "Timed out listing t3 releases." })),
+        orElse: () =>
+          Effect.fail(new CliUpdateError({ reason: "Timed out listing cove releases." })),
       }),
     );
     const releases = yield* decodeReleaseIndex(body).pipe(
       Effect.mapError(
-        () => new CliUpdateError({ reason: "The t3 release index had an unexpected shape." }),
+        () => new CliUpdateError({ reason: "The cove release index had an unexpected shape." }),
       ),
     );
     const version = newestCliReleaseVersion(releases, channel);
@@ -215,7 +216,7 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(";"),
   ].filter((entry) => entry.trim().length > 0);
   for (const directory of candidates) {
-    const shimPath = path.join(directory, "t3.cmd");
+    const shimPath = path.join(directory, "cove.cmd");
     const contents = yield* fs.readFileString(shimPath).pipe(Effect.option);
     if (Option.isNone(contents)) continue;
     const target = windowsShimTarget(contents.value);
@@ -311,7 +312,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   const runner = yield* ProcessRunner.ProcessRunner;
   if (platform === "linux") {
     const cgroup = yield* fs.readFileString(`/proc/${pid}/cgroup`).pipe(Effect.option);
-    return Option.isSome(cgroup) && cgroup.value.includes("/t3code.service");
+    return Option.isSome(cgroup) && cgroup.value.includes("/covecode.service");
   }
   if (platform === "darwin") {
     const parent = yield* runner
@@ -454,8 +455,8 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       : executableCurrent
         ? `Updating the background service ${serviceVersion ?? "(unknown version)"} -> ${targetVersion} (${targetChannel}).`
         : alreadyOnDisk
-          ? "Switching T3 Code"
-          : "Updating T3 Code",
+          ? "Switching Cove Code"
+          : "Updating Cove Code",
     executableCurrent
       ? ""
       : `${currentVersion} → ${targetVersion}${targetChannel === "stable" ? "" : ` (${targetChannel})`}`,
@@ -585,9 +586,9 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     });
   }
 
-  progress.success(`Installed T3 Code ${targetVersion}`);
+  progress.success(`Installed Cove Code ${targetVersion}`);
   if (Option.isSome(repointed)) {
-    yield* Console.log("  Run t3 to get started.\n");
+    yield* Console.log("  Run cove to get started.\n");
   } else {
     yield* Console.log(`  Run ${runtime.entryPath}\n`);
   }
@@ -608,11 +609,11 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
           ? `the version before ${serviceVersion}`
           : serviceVersion;
     yield* Console.log(
-      `  Background service still running ${running}. Run \`t3 service restart\` when you are ready to switch it to ${targetVersion}.`,
+      `  Background service still running ${running}. Run \`cove service restart\` when you are ready to switch it to ${targetVersion}.`,
     );
   } else if (status.installed && !servesThisHome) {
     yield* Console.log(
-      `  The background service serves ${status.installedBaseDir ?? "another T3 home"} and was left unchanged.`,
+      `  The background service serves ${status.installedBaseDir ?? "another Cove home"} and was left unchanged.`,
     );
   }
   if (foreground !== undefined) {

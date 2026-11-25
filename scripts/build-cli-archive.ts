@@ -96,7 +96,7 @@ export function cliArchivePlatformKey(platform: BuildPlatform, arch: BuildArch):
 }
 
 export function cliArchiveStem(version: string, platform: BuildPlatform, arch: BuildArch): string {
-  return `t3-${version}-${cliArchivePlatformKey(platform, arch)}`;
+  return `cove-${version}-${cliArchivePlatformKey(platform, arch)}`;
 }
 
 export function cliArchiveFileName(version: string, platform: BuildPlatform, arch: BuildArch) {
@@ -596,13 +596,13 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
   const serverDir = path.join(repoRoot, "apps/server");
-  const executableName = input.platform === "win" ? "t3.exe" : "t3";
+  const executableName = input.platform === "win" ? "cove.exe" : "cove";
   // tsdown suffixes cross-built executables; prefer the exact target over the plain host build.
   const targetKey = `${input.platform === "mac" ? "darwin" : input.platform}-${input.arch}`;
   const targetExecutable = path.join(
     serverDir,
     "dist-exe",
-    `t3-${targetKey}${input.platform === "win" ? ".exe" : ""}`,
+    `cove-${targetKey}${input.platform === "win" ? ".exe" : ""}`,
   );
   // The unsuffixed executable is valid only for the host platform and architecture.
   const hostPlatform = yield* HostProcess.Platform;

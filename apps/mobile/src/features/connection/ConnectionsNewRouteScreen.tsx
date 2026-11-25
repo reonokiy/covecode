@@ -239,7 +239,7 @@ function PairingForm({
               <PairingInputRow
                 label={gt("Address")}
                 keyboardType="url"
-                placeholder="192.168.1.100:3773"
+                placeholder="192.168.1.100:3774"
                 value={hostInput}
                 onChangeText={handleHostChange}
               />

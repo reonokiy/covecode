@@ -54,24 +54,24 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const windows = platform === "win32";
   if (Option.isNone(runtime)) {
     const script = windows
-      ? "irm https://t3.codes/install.ps1 | iex"
-      : "curl -fsSL https://t3.codes/install.sh | sh";
+      ? "irm https://raw.githubusercontent.com/reonokiy/t3code/covecode/scripts/install.ps1 | iex"
+      : "curl -fsSL https://raw.githubusercontent.com/reonokiy/t3code/covecode/scripts/install.sh | sh";
     return yield* new CliInstallError({
-      reason: `Only the standalone t3 can install itself. Use \`${script}\`, or Settings in the desktop app.`,
+      reason: `Only the standalone cove CLI can install itself. Use \`${script}\`, or Settings in the desktop app.`,
     });
   }
   const { executable, versionsDir, runtimeDir } = runtime.value;
   // cmd.exe expands `%` and reads the shim in the OEM code page, so such a path would not run.
   if (windows && /[%\u0080-\uffff]/.test(executable)) {
     return yield* new CliInstallError({
-      reason: `A t3.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Keep using npx t3.`,
+      reason: `A cove.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Keep using npx covecode.`,
     });
   }
   // Absolute, so the PATH hint never adds a folder that changes with the working directory.
   const binDir = path.resolve(
     environment.T3CODE_INSTALL_BIN_DIR?.trim() || path.join(home, ".local", "bin"),
   );
-  const name = windows ? "t3.cmd" : "t3";
+  const name = windows ? "cove.cmd" : "cove";
   const link = path.join(binDir, name);
   const failed = (reason: string) => (cause: unknown) => new CliInstallError({ reason, cause });
 
@@ -108,7 +108,7 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
     )
   ) {
     return yield* new CliInstallError({
-      reason: `Another t3 is already at ${link}. Remove it, then run this again.`,
+      reason: `Another cove is already at ${link}. Remove it, then run this again.`,
     });
   }
 
@@ -154,7 +154,7 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
     for (const entry of entries) {
       if (same(entry)) return undefined;
       if (!path.isAbsolute(entry) || detectCliRunner(`${entry}/`) !== null) continue;
-      for (const name of windows ? ["t3.cmd", "t3.exe"] : ["t3"]) {
+      for (const name of windows ? ["cove.cmd", "cove.exe"] : ["cove"]) {
         const candidate = path.join(entry, name);
         if (yield* resolveCommandPath(candidate, { env: environment })) return candidate;
       }
@@ -190,30 +190,30 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
 const reportInstalled = Effect.fn("cli.install.report")(function* (
   installed: Effect.Success<ReturnType<typeof installCli>>,
 ) {
-  yield* Console.log(`Installed t3 ${packageJson.version} at ${installed.link}.`);
+  yield* Console.log(`Installed cove ${packageJson.version} at ${installed.link}.`);
   if (installed.shadowedBy !== undefined) {
     return yield* Console.log(
-      `Another t3 at ${installed.shadowedBy} runs first, so run ${installed.link} to use this one.`,
+      `Another cove at ${installed.shadowedBy} runs first, so run ${installed.link} to use this one.`,
     );
   }
-  if (installed.onPath) return yield* Console.log("Run `t3` to get started.");
+  if (installed.onPath) return yield* Console.log("Run `cove` to get started.");
   if (installed.pathCommand === undefined) {
-    return yield* Console.log(`Add ${installed.binDir} to your PATH, then run \`t3\`.`);
+    return yield* Console.log(`Add ${installed.binDir} to your PATH, then run \`cove\`.`);
   }
   if ((yield* HostProcess.Platform) === "win32") {
     yield* Console.log(
       `${installed.binDir} is not on your PATH yet. In this PowerShell window, run:`,
     );
     yield* Console.log(`  ${installed.pathCommand}`);
-    return yield* Console.log("Then run `t3`. For new windows, add the folder to your PATH.");
+    return yield* Console.log("Then run `cove`. For new windows, add the folder to your PATH.");
   }
   yield* Console.log(`${installed.binDir} is not on your PATH yet. Add it with:`);
   yield* Console.log(`  ${installed.pathCommand}`);
-  yield* Console.log("Then open a new terminal and run `t3`.");
+  yield* Console.log("Then open a new terminal and run `cove`.");
 });
 
 export const installCommand = Command.make("install").pipe(
-  Command.withDescription("Install this version as the `t3` command."),
+  Command.withDescription("Install this version as the `cove` command."),
   Command.withHandler(() => installCli().pipe(Effect.flatMap(reportInstalled))),
 );
 
@@ -317,13 +317,13 @@ export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R, E
   // Any t3 already installed means no prompt: ours (even when off PATH) or another on PATH.
   // Runners put their own cache's node_modules/.bin on PATH, so skip those.
   const windows = platform === "win32";
-  const names = windows ? ["t3.cmd", "t3.exe"] : ["t3"];
+  const names = windows ? ["cove.cmd", "cove.exe"] : ["cove"];
   const launchers = yield* fs
     .readFileString(path.join(runtimeDir, "launchers"))
     .pipe(Effect.orElseSucceed(() => ""));
   const candidates = [
     ...launchers.split(/\r?\n/).filter(Boolean),
-    path.join(path.dirname(runtimeDir), "bin", windows ? "t3.cmd" : "t3"),
+    path.join(path.dirname(runtimeDir), "bin", windows ? "cove.cmd" : "cove"),
     ...(environment.PATH ?? environment.Path ?? "")
       .split(windows ? ";" : ":")
       .filter(

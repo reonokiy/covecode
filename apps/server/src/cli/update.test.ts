@@ -58,7 +58,7 @@ it.effect("authenticates each release page until the requested channel is found"
     const httpClient = HttpClient.make((request) => {
       const url = new URL(request.url);
       assert.equal(url.origin, "https://api.github.com");
-      assert.equal(url.pathname, "/repos/pingdotgg/t3code/releases");
+      assert.equal(url.pathname, "/repos/reonokiy/t3code/releases");
       assert.equal(request.headers.accept, "application/vnd.github+json");
       assert.equal(request.headers.authorization, "Bearer gh-token");
       const page = url.searchParams.get("page") ?? "";
@@ -158,7 +158,7 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
   it.effect("refuses to update when updates are off", () =>
     Effect.gen(function* () {
       const error = yield* runWithPolicy({ mode: "off" });
-      assert.equal(error.message, "Example Corp manages T3 Code updates.");
+      assert.equal(error.message, "Example Corp manages Cove Code updates.");
     }),
   );
 
@@ -175,7 +175,7 @@ it.layer(NodeServices.layer)("t3 update under a managed policy", (it) => {
       for (const error of [byChannel, byVersion]) {
         assert.equal(
           error.message,
-          "Example Corp manages T3 Code updates. Only stable releases can be installed.",
+          "Example Corp manages Cove Code updates. Only stable releases can be installed.",
         );
       }
     }),
@@ -206,9 +206,9 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-update-" });
-      const oldExe = path.join(root, "runtime/versions/1.0.0/t3");
-      const newExe = path.join(root, "runtime/versions/2.0.0/t3");
-      const launcher = path.join(root, "bin/t3");
+      const oldExe = path.join(root, "runtime/versions/1.0.0/cove");
+      const newExe = path.join(root, "runtime/versions/2.0.0/cove");
+      const launcher = path.join(root, "bin/cove");
       for (const file of [oldExe, newExe]) {
         yield* fs.makeDirectory(path.dirname(file), { recursive: true });
         yield* fs.writeFileString(file, "");
@@ -241,15 +241,15 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
         );
         // A quote and a space in the home path exercise the script's quoting.
         const home = path.join(root, "it's home");
-        const entry = (version: string) => path.join(home, "runtime/versions", version, "t3");
+        const entry = (version: string) => path.join(home, "runtime/versions", version, "cove");
         for (const version of ["1.0.0", "2.0.0"]) {
           yield* fs.makeDirectory(path.dirname(entry(version)), { recursive: true });
           yield* fs.writeFileString(entry(version), '#!/bin/sh\nprintf \'[%s]\\n\' "$0" "$@"\n', {
             mode: 0o755,
           });
         }
-        const launcher = path.join(root, "bin/t3");
-        const alias = path.join(root, "alias/t3");
+        const launcher = path.join(root, "bin/cove");
+        const alias = path.join(root, "alias/cove");
         yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
         yield* fs.makeDirectory(path.dirname(alias), { recursive: true });
         yield* fs.writeFileString(launcher, posixLauncherScript(entry("1.0.0")), { mode: 0o755 });
@@ -275,7 +275,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
 
         // Like the shell, a relative PATH entry resolves from the working directory, and a
         // script nobody can execute is passed over.
-        const unrunnable = path.join(root, "unrunnable/t3");
+        const unrunnable = path.join(root, "unrunnable/cove");
         yield* fs.makeDirectory(path.dirname(unrunnable), { recursive: true });
         yield* fs.writeFileString(unrunnable, posixLauncherScript(entry("2.0.0")), { mode: 0o644 });
         yield* fs.writeFileString(launcher, posixLauncherScript(entry("2.0.0")), { mode: 0o755 });
@@ -318,22 +318,22 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       for (const version of ["1.0.0", "2.0.0"]) {
         const directory = path.join(root, "runtime/versions", version);
         yield* fs.makeDirectory(directory, { recursive: true });
-        yield* fs.writeFileString(path.join(directory, "t3"), "");
+        yield* fs.writeFileString(path.join(directory, "cove"), "");
         yield* fs.writeFileString(path.join(directory, ".install-complete"), `${version}\n`);
         yield* fs.utimes(path.join(directory, ".install-complete"), 0, 0);
       }
       if (recorded !== undefined) {
         yield* fs.writeFileString(path.join(root, "runtime/launchers"), recorded);
       }
-      // A launcher in the T3 home itself, which neither PATH nor the default bin dir reaches.
-      const launcher = path.join(root, "t3");
-      yield* fs.symlink(path.join(root, "runtime/versions/1.0.0/t3"), launcher);
+      // A launcher in the Cove home itself, which neither PATH nor the default bin dir reaches.
+      const launcher = path.join(root, "cove");
+      yield* fs.symlink(path.join(root, "runtime/versions/1.0.0/cove"), launcher);
 
       const launchersFile = path.join(root, "runtime/launchers");
       yield* repointLauncher({
         launchedAs: launcher,
         baseDir: root,
-        targetEntryPath: path.join(root, "runtime/versions/2.0.0/t3"),
+        targetEntryPath: path.join(root, "runtime/versions/2.0.0/cove"),
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, {
           ...fs,
@@ -349,7 +349,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
               ),
         }),
       );
-      // A later server start prunes with no idea how this machine launches t3.
+      // A later server start prunes with no idea how this machine launches cove.
       const removed = yield* prunePinnedRuntimes({ baseDir: root, keep: [] }).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, unrelatedLsof),
         Effect.provideService(HostProcess.Platform, "darwin"),
@@ -360,7 +360,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
       assert.deepStrictEqual(removed, ["1.0.0"]);
       assert.equal(
         yield* readPosixLauncherTarget(launcher),
-        path.join(root, "runtime/versions/2.0.0/t3"),
+        path.join(root, "runtime/versions/2.0.0/cove"),
       );
     }).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
@@ -369,9 +369,9 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-update-" });
-    const oldExe = path.join(root, "runtime/versions/1.0.0/t3");
-    const newExe = path.join(root, "runtime/versions/2.0.0/t3");
-    const launcher = path.join(root, "t3");
+    const oldExe = path.join(root, "runtime/versions/1.0.0/cove");
+    const newExe = path.join(root, "runtime/versions/2.0.0/cove");
+    const launcher = path.join(root, "cove");
     for (const file of [oldExe, newExe]) {
       yield* fs.makeDirectory(path.dirname(file), { recursive: true });
       yield* fs.writeFileString(file, "");
@@ -609,7 +609,7 @@ it.layer(NodeServices.layer)("t3 update with a background service", (it) => {
 
       assert.include(
         output,
-        `Background service still running the version before ${version}. Run \`t3 service restart\` when you are ready to switch it to ${version}.`,
+        `Background service still running the version before ${version}. Run \`cove service restart\` when you are ready to switch it to ${version}.`,
       );
     }).pipe(
       Effect.provideService(HostProcess.Platform, "linux"),

@@ -33,6 +33,6 @@ export function hostFreezeNotice(
               cpuCount,
             }),
           )
-        : resolve(msg("T3 Code on {host} was too busy to answer.", { host: hostLabel })),
+        : resolve(msg("Cove Code on {host} was too busy to answer.", { host: hostLabel })),
   };
 }

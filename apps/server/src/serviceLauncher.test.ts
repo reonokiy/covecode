@@ -143,10 +143,10 @@ it("rejects contradictory service state", () => {
 });
 
 const unitPlan = (root: string, version: string) => ({
-  program: [`${root}/runtime/versions/${version}/t3`, "__service-launcher"],
+  program: [`${root}/runtime/versions/${version}/cove`, "__service-launcher"],
   baseDir: root,
   logPath: `${root}/logs/boot-service.log`,
-  unitPath: `${root}/unit/t3code.service`,
+  unitPath: `${root}/unit/covecode.service`,
 });
 
 const writeFakeRuntime = (
@@ -156,7 +156,7 @@ const writeFakeRuntime = (
   childSource: string,
 ) =>
   Effect.gen(function* () {
-    const entryPath = path.join(versionDir, "t3");
+    const entryPath = path.join(versionDir, "cove");
     yield* fs.makeDirectory(versionDir, { recursive: true });
     yield* fs.writeFileString(entryPath, `#!${process.execPath}\n${childSource}`);
     yield* fs.chmod(entryPath, 0o755);
@@ -474,12 +474,12 @@ setInterval(() => {}, 1_000);
         return { stdout: task };
       };
 
-      yield* Effect.promise(() => registerServiceTask(unitPath, "t3code-PC-theo", schtasks));
+      yield* Effect.promise(() => registerServiceTask(unitPath, "covecode-PC-theo", schtasks));
       assert.equal(task, disabledServiceTask(unit));
       assert.deepEqual(yield* fs.readDirectory(root), ["t3code-task.xml"]);
 
       task = unit.replace("1.1.0", "1.0.0");
-      yield* Effect.promise(() => registerServiceTask(unitPath, "t3code-PC-theo", schtasks));
+      yield* Effect.promise(() => registerServiceTask(unitPath, "covecode-PC-theo", schtasks));
       assert.equal(task, unit);
     }),
   );
@@ -535,7 +535,7 @@ setInterval(() => {}, 1_000);
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-xdg-" });
         const home = path.join(root, "home");
         const managerUnitDir = path.join(home, ".config", "systemd", "user");
-        const unitPath = path.join(managerUnitDir, "t3code.service");
+        const unitPath = path.join(managerUnitDir, "covecode.service");
         const render = (version: string) =>
           renderBootServiceUnit({ ...unitPlan(root, version), unitPath });
         yield* fs.makeDirectory(managerUnitDir, { recursive: true });
@@ -579,7 +579,7 @@ setInterval(() => {}, 1_000);
         vi.stubEnv("HOME", home);
         // environment.d changes what services inherit, not where the manager reads units.
         vi.stubEnv("XDG_CONFIG_HOME", path.join(home, "service-config"));
-        vi.stubEnv("T3_BOOT_SERVICE_UNIT", "t3code.service");
+        vi.stubEnv("T3_BOOT_SERVICE_UNIT", "covecode.service");
 
         yield* Effect.promise(() =>
           expect(runLauncher(root)).rejects.toThrow("Active child exited unexpectedly (0)."),

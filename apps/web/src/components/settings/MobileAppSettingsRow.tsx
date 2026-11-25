@@ -10,14 +10,14 @@ import { useSearchableSetting } from "./settingsSearch";
 const stores = [
   {
     label: msg("iPhone and iPad"),
-    store: "App Store",
-    url: "https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824",
+    store: "Releases",
+    url: "https://github.com/reonokiy/t3code/releases",
     Icon: AppleIcon,
   },
   {
     label: "Android",
-    store: "Google Play",
-    url: "https://play.google.com/store/apps/details?id=com.t3tools.t3code",
+    store: "Releases",
+    url: "https://github.com/reonokiy/t3code/releases",
     Icon: AndroidIcon,
   },
 ];

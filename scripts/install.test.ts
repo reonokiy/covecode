@@ -26,11 +26,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
     const home = NodePath.join(root, homeName);
     const version = "1.2.3";
     const target = NodePath.join(home, "runtime/versions", version);
-    const launcher = NodePath.join(root, "bin/t3");
+    const launcher = NodePath.join(root, "bin/cove");
     try {
       await NodeFSP.mkdir(target, { recursive: true });
       await NodeFSP.writeFile(NodePath.join(target, ".install-complete"), `${version}\n`);
-      await NodeFSP.writeFile(NodePath.join(target, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
+      await NodeFSP.writeFile(NodePath.join(target, "cove"), "#!/bin/sh\necho 'cove v1.2.3'\n", {
         mode: 0o755,
       });
       const install = () =>
@@ -51,16 +51,16 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer home
       expect(first.status, first.stdout + first.stderr).toBe(0);
       const { status, stdout, stderr } = install();
       expect(status, stdout + stderr).toBe(0);
-      expect(stderr).toContain(`Installed T3 Code ${version}`);
+      expect(stderr).toContain(`Installed Cove Code ${version}`);
       expect(await NodeFSP.readFile(launcher, "utf8")).toBe(
-        launcherScript(NodePath.join(target, "t3")),
+        launcherScript(NodePath.join(target, "cove")),
       );
       expect(
         NodeChildProcess.execFileSync(launcher, ["--version"], {
           cwd: NodeOS.tmpdir(),
           encoding: "utf8",
         }).trim(),
-      ).toBe("t3 v1.2.3");
+      ).toBe("cove v1.2.3");
     } finally {
       await NodeFSP.rm(temporaryRoot, { recursive: true, force: true });
     }
@@ -80,10 +80,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
       if (failures-- > 0) return response.writeHead(504).end();
       const url = new URL(request.url ?? "/", "http://fixture");
       const body =
-        url.pathname === "/pingdotgg/t3code/releases/latest" &&
+        url.pathname === "/reonokiy/t3code/releases/latest" &&
         request.headers.accept === "application/json"
           ? { tag_name: "v1.2.3" }
-          : url.pathname === "/repos/pingdotgg/t3code/releases"
+          : url.pathname === "/repos/reonokiy/t3code/releases"
             ? { "1": nightlies, "2": [{ tag_name: `v${version}` }, { tag_name: "v1.2.3" }] }[
                 url.searchParams.get("page") ?? ""
               ]
@@ -128,7 +128,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
         },
       );
       expect(code, output).toBe(0);
-      expect(output).toContain(`Installed T3 Code ${version}`);
+      expect(output).toContain(`Installed Cove Code ${version}`);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -144,7 +144,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
     it("names the archive when it returns 404", async () => {
       const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-archive-"));
       const arch = HostProcess.Architecture.defaultValue() === "arm64" ? "arm64" : "x64";
-      const archive = `t3-1.2.3-linux-${arch}.tar.gz`;
+      const archive = `cove-1.2.3-linux-${arch}.tar.gz`;
       const server = NodeHttp.createServer((request, response) => {
         if (request.url === "/v1.2.3/SHA256SUMS")
           return response.end(`${"0".repeat(64)}  ${archive}\n`);
@@ -179,7 +179,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
           },
         );
         expect(code, output).not.toBe(0);
-        expect(output).toMatch(new RegExp(`t3 install: .*${archive.replaceAll(".", "\\.")}`));
+        expect(output).toMatch(new RegExp(`cove install: .*${archive.replaceAll(".", "\\.")}`));
       } finally {
         server.closeAllConnections();
         await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -227,13 +227,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
     try {
       const home = NodePath.join(root, "home");
       const binDir = NodePath.join(root, "bin");
-      const link = NodePath.join(binDir, "t3");
+      const link = NodePath.join(binDir, "cove");
       await NodeFSP.mkdir(binDir, { recursive: true });
 
       await NodeFSP.writeFile(link, "#!/bin/sh\necho mine\n");
       const foreign = await installOver({ script: "install.sh", home, binDir });
       expect(foreign.code).not.toBe(0);
-      expect(foreign.output).toContain(`another t3 is already at ${link}`);
+      expect(foreign.output).toContain(`another cove is already at ${link}`);
       expect(await NodeFSP.readFile(link, "utf8")).toBe("#!/bin/sh\necho mine\n");
       // Not even from inside the versions folder, where `.` would resolve into it.
       const fromVersions = await installOver({
@@ -248,13 +248,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
       // A link that only looks like it points into versions (join() would normalize the ..).
       await NodeFSP.rm(link);
       await NodeFSP.mkdir(NodePath.join(home, "other"), { recursive: true });
-      await NodeFSP.writeFile(NodePath.join(home, "other/t3"), "#!/bin/sh\n");
-      await NodeFSP.symlink(`${home}/runtime/versions/../../other/t3`, link);
+      await NodeFSP.writeFile(NodePath.join(home, "other/cove"), "#!/bin/sh\n");
+      await NodeFSP.symlink(`${home}/runtime/versions/../../other/cove`, link);
       const climbing = await installOver({ script: "install.sh", home, binDir });
       expect(climbing.code).not.toBe(0);
-      expect(await NodeFSP.readlink(link)).toBe(`${home}/runtime/versions/../../other/t3`);
+      expect(await NodeFSP.readlink(link)).toBe(`${home}/runtime/versions/../../other/cove`);
 
-      // Only `<version>/t3` counts, not another program inside a version.
+      // Only `<version>/cove` counts, not another program inside a version.
       await NodeFSP.rm(link);
       await NodeFSP.symlink(NodePath.join(home, "runtime/versions/1.0.0/helper"), link);
       const sibling = await installOver({ script: "install.sh", home, binDir });
@@ -263,9 +263,9 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
         NodePath.join(home, "runtime/versions/1.0.0/helper"),
       );
 
-      // An upgrade over an older version's link, written through a symlinked T3 home.
+      // An upgrade over an older version's link, written through a symlinked Cove home.
       await NodeFSP.rm(link);
-      await NodeFSP.symlink(NodePath.join(home, "runtime/versions/1.0.0/t3"), link);
+      await NodeFSP.symlink(NodePath.join(home, "runtime/versions/1.0.0/cove"), link);
       await NodeFSP.symlink(home, NodePath.join(root, "alias"));
       const upgrade = await installOver({
         script: "install.sh",
@@ -275,7 +275,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
       });
       expect(upgrade.code, upgrade.output).toBe(0);
       expect(await NodeFSP.readFile(link, "utf8")).toBe(
-        launcherScript(NodePath.join(root, "alias/runtime/versions/1.2.3/t3")),
+        launcherScript(NodePath.join(root, "alias/runtime/versions/1.2.3/cove")),
       );
       expect(upgrade.output).toContain(
         `printf '\\n%s\\n' 'export PATH="$PATH:$HOME/bin"' >> ~/.zshrc`,
@@ -291,7 +291,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
       expect(noShell.code, noShell.output).toBe(0);
       expect(noShell.output).toContain(`Add ${binDir} to your PATH`);
 
-      // Its folder on PATH with a trailing slash is still this t3, not another one.
+      // Its folder on PATH with a trailing slash is still this cove, not another one.
       const slashed = await installOver({
         script: "install.sh",
         home,
@@ -299,7 +299,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
         env: { HOME: root, PATH: `${binDir}/:/usr/bin:/bin` },
       });
       expect(slashed.code, slashed.output).toBe(0);
-      expect(slashed.output).toContain("Run t3 to use T3 Code here");
+      expect(slashed.output).toContain("Run cove to use Cove Code here");
 
       // A relative folder is made absolute, so the PATH command never follows the working directory.
       const relative = await installOver({
@@ -313,14 +313,14 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
       expect(relative.output).toContain(`'export PATH="$PATH:$HOME/bin"'`);
 
       // A launcher script someone edited is theirs now.
-      const edited = `${launcherScript(NodePath.join(home, "runtime/versions/1.2.3/t3"))}# mine\n`;
+      const edited = `${launcherScript(NodePath.join(home, "runtime/versions/1.2.3/cove"))}# mine\n`;
       await NodeFSP.writeFile(link, edited);
       const overEdited = await installOver({ script: "install.sh", home, binDir });
       expect(overEdited.code).not.toBe(0);
       expect(await NodeFSP.readFile(link, "utf8")).toBe(edited);
 
       await NodeFSP.rm(link);
-      await NodeFSP.symlink(NodePath.join(home, "bin/t3"), link);
+      await NodeFSP.symlink(NodePath.join(home, "bin/cove"), link);
       const overDesktop = await installOver({
         script: "install.sh",
         home: `${home}//`,
@@ -328,7 +328,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
       });
       expect(overDesktop.code, overDesktop.output).toBe(0);
       expect(await NodeFSP.readFile(link, "utf8")).toBe(
-        launcherScript(NodePath.join(home, "runtime/versions/1.2.3/t3")),
+        launcherScript(NodePath.join(home, "runtime/versions/1.2.3/cove")),
       );
     } finally {
       await NodeFSP.rm(root, { recursive: true, force: true });
@@ -346,7 +346,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 t3
       const shim = NodePath.join(binDir, "t3.cmd");
       await NodeFSP.mkdir(binDir, { recursive: true });
 
-      const desktopShim = '@echo off\r\n"C:\\Program Files\\T3 Code\\T3 Code.exe" "x" %*\r\n';
+      const desktopShim = '@echo off\r\n"C:\\Program Files\\Cove Code\\Cove Code.exe" "x" %*\r\n';
       await NodeFSP.writeFile(shim, desktopShim);
       const foreign = await installOver({ script: "install.ps1", home, binDir });
       expect(foreign.code).not.toBe(0);
@@ -403,7 +403,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 t3
         env: { [pathKey]: `${binDir}\\;${process.env[pathKey] ?? ""}` },
       });
       expect(slashed.code, slashed.output).toBe(0);
-      expect(slashed.output).toContain("to use T3 Code here");
+      expect(slashed.output).toContain("to use Cove Code here");
       // The same when the install folder itself is given with a trailing separator.
       const bothSlashed = await installOver({
         script: "install.ps1",
@@ -412,7 +412,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 t3
         env: { [pathKey]: `${binDir}\\;${process.env[pathKey] ?? ""}` },
       });
       expect(bothSlashed.code, bothSlashed.output).toBe(0);
-      expect(bothSlashed.output).toContain("to use T3 Code here");
+      expect(bothSlashed.output).toContain("to use Cove Code here");
     } finally {
       await NodeFSP.rm(root, { recursive: true, force: true });
     }
@@ -436,7 +436,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
         const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-checksum-"));
         const home = NodePath.join(root, homeName);
         const version = "1.2.3";
-        const stem = `t3-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+        const stem = `cove-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
         const archiveName = `${stem}.tar.gz`;
         const server = NodeHttp.createServer();
         try {
@@ -468,8 +468,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
           }
           await NodeFSP.mkdir(NodePath.join(root, stem));
           await NodeFSP.writeFile(
-            NodePath.join(root, stem, "t3"),
-            "#!/bin/sh\necho 't3 v1.2.3'\n",
+            NodePath.join(root, stem, "cove"),
+            "#!/bin/sh\necho 'cove v1.2.3'\n",
             { mode: 0o755 },
           );
           const archivePath = NodePath.join(root, archiveName);
@@ -517,14 +517,14 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
               await NodeFSP.readFile(NodePath.join(versions, version, ".install-complete"), "utf8"),
             ).toBe("1.2.3\n");
             expect(
-              NodeChildProcess.execFileSync(NodePath.join(root, "bin/t3"), ["--version"], {
+              NodeChildProcess.execFileSync(NodePath.join(root, "bin/cove"), ["--version"], {
                 encoding: "utf8",
               }).trim(),
-            ).toBe("t3 v1.2.3");
+            ).toBe("cove v1.2.3");
           } else {
             expect(code).not.toBe(0);
             expect(output).toContain("checksum mismatch");
-            expect(output).not.toContain("Installed T3 Code");
+            expect(output).not.toContain("Installed Cove Code");
             expect(await NodeFSP.readdir(versions)).toEqual([]);
           }
         } finally {
@@ -542,7 +542,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("concurrent ins
   it("publishes one runtime without nesting the other install's staging directory", async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-install-concurrent-"));
     const version = "1.2.3";
-    const stem = `t3-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
+    const stem = `cove-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
     const archiveName = `${stem}.tar.gz`;
     const target = NodePath.join(root, "home/runtime/versions", version);
     const waiting = new Map<string, NodeHttp.ServerResponse>();
@@ -551,9 +551,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("concurrent ins
       const tools = NodePath.join(root, "tools");
       await NodeFSP.mkdir(tools);
       await NodeFSP.mkdir(NodePath.join(root, stem));
-      await NodeFSP.writeFile(NodePath.join(root, stem, "t3"), "#!/bin/sh\necho 't3 v1.2.3'\n", {
-        mode: 0o755,
-      });
+      await NodeFSP.writeFile(
+        NodePath.join(root, stem, "cove"),
+        "#!/bin/sh\necho 'cove v1.2.3'\n",
+        {
+          mode: 0o755,
+        },
+      );
       const archivePath = NodePath.join(root, archiveName);
       NodeChildProcess.execFileSync("tar", ["-czf", archivePath, "-C", root, stem]);
       const archive = await NodeFSP.readFile(archivePath);
