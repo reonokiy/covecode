@@ -1,7 +1,7 @@
 # T3 Connect setup
 
 Deployment and client configuration for T3 Connect. The [architecture note](../internals/t3-connect.md)
-explains the trust boundaries; the [relay README](../../infra/relay/README.md#deployment) owns relay
+explains the trust boundaries; the [cove-cp deployment guide](../../infra/cp/README.md#docker-compose-deployment) contains control-plane
 provisioning instructions.
 
 ## Public application configuration
@@ -30,7 +30,7 @@ Client and bundled-server builds embed the public values, so set them before bui
 EAS preview and production environments need the publishable key, JWT template name, and relay URL.
 Bundled servers also accept runtime overrides for operator-managed deployments.
 
-Copy `infra/relay/.env.example` to `infra/relay/.env` for relay deployment settings.
+Copy `infra/cp/.env.example` to `infra/cp/.env` for relay deployment settings.
 Deploy `prod` before personal stages because it owns the retained database that their branches
 depend on. The stack's `PublishClientConfig` action writes the resulting relay URL back to the root `.env`.
 

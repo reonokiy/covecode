@@ -1,0 +1,13 @@
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!.pnpmfile.cjs
+!patches/**
+!packages/*/package.json
+!packages/*/src/**
+!infra/cp/package.json
+!infra/cp/src/**
+!infra/cp/migrations/**
+**/node_modules
+**/.env*

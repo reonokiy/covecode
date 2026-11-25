@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cove
+      POSTGRES_PASSWORD: cove-change-me
+      POSTGRES_DB: cove_cp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U cove -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  cove-cp:
+    build:
+      context: ../..
+      dockerfile: infra/cp/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8787:8787"
+      - "4001:4001"
+      - "4002:4002"
+    volumes:
+      - cp_state:/data/cove-cp
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8787"
+      DATABASE_URL: postgres://cove:cove-change-me@postgres:5432/cove_cp
+      COVE_CP_DATA_DIR: /data/cove-cp
+      COVE_CP_AUTO_MIGRATE: "true"
+      # Replace with your public HTTPS origin and OIDC provider settings:
+      COVE_CP_PUBLIC_URL: ${COVE_CP_PUBLIC_URL:-http://localhost:8787}
+      COVE_CP_OIDC_ISSUER: ${COVE_CP_OIDC_ISSUER:?Set COVE_CP_OIDC_ISSUER}
+      COVE_CP_OIDC_CLIENT_ID: ${COVE_CP_OIDC_CLIENT_ID:-cove-app}
+      COVE_CP_OIDC_AUDIENCE: ${COVE_CP_OIDC_AUDIENCE:-}
+      COVE_CP_OIDC_SCOPES: ${COVE_CP_OIDC_SCOPES:-openid,profile,email}
+      COVE_CP_LIBP2P_ENABLED: "true"
+      COVE_CP_LIBP2P_LISTEN: /ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/tcp/4002/ws
+      COVE_CP_LIBP2P_ANNOUNCE: ${COVE_CP_LIBP2P_ANNOUNCE:-}
+      COVE_CP_TUNNEL_NAMESPACE: ${COVE_CP_TUNNEL_NAMESPACE:-selfhosted}
+      COVE_CP_MAX_MANAGED_TUNNELS: ${COVE_CP_MAX_MANAGED_TUNNELS:-20}
+
+volumes:
+  postgres_data:
+  cp_state:

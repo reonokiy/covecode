@@ -137,7 +137,7 @@
       // React Native codegen discovers component specifications by filename.
       "entry": ["src/*NativeComponent.ts!"],
     },
-    "infra/relay": {
+    "infra/cp": {
       "entry": ["src/bin.ts!", "src/persistence/schema.ts!"],
     },
     "packages/*": {

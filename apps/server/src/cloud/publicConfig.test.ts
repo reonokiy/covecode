@@ -72,7 +72,7 @@ it.effect("resolves CLI OIDC endpoints via explicit env issuer and OIDC discover
       provideEnv({
         T3CODE_OIDC_ISSUER: "https://idp.example.test/realms/cove/",
         T3CODE_OIDC_CLIENT_ID: "cove-cli",
-        T3CODE_OIDC_AUDIENCE: "cove-relay",
+        T3CODE_OIDC_AUDIENCE: "cove-cp",
         T3CODE_OIDC_SCOPES: "openid profile email",
       }),
     );
@@ -83,7 +83,7 @@ it.effect("resolves CLI OIDC endpoints via explicit env issuer and OIDC discover
     assert.deepEqual(config, {
       issuer: "https://idp.example.test/realms/cove",
       clientId: "cove-cli",
-      audience: "cove-relay",
+      audience: "cove-cp",
       authorizationEndpoint: "https://idp.example.test/realms/cove/auth",
       tokenEndpoint: "https://idp.example.test/realms/cove/token",
       deviceAuthorizationEndpoint: "https://idp.example.test/realms/cove/device",

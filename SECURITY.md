@@ -98,7 +98,7 @@ once it has one.
 - Guest links: [`guest/GuestShareService.ts`](apps/server/src/guest/GuestShareService.ts)
 - Files and assets: [`workspace/WorkspaceFileSystem.ts`](apps/server/src/workspace/WorkspaceFileSystem.ts), [`assets/AssetAccess.ts`](apps/server/src/assets/AssetAccess.ts)
 - Managed policy: [`apps/server/src/policy`](apps/server/src/policy)
-- T3 Connect: [`cloud/CloudLink.ts`](apps/server/src/cloud/CloudLink.ts), [`EnvironmentConnector.ts`](infra/relay/src/environments/EnvironmentConnector.ts)
+- T3 Connect: [`cloud/CloudLink.ts`](apps/server/src/cloud/CloudLink.ts), [`EnvironmentConnector.ts`](infra/cp/src/environments/EnvironmentConnector.ts)
 - Desktop preview isolation: [`preview/WebviewPreferences.ts`](apps/desktop/src/preview/WebviewPreferences.ts)
 
 ## How to audit and triage

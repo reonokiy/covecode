@@ -19,7 +19,7 @@ The relay Alchemy stack owns a shared Axiom trace setup:
 Alchemy stages append their sanitized stage name to isolate resources, for example
 `t3-code-relay-traces-dev-julius` for a personal stage.
 
-Deploy from `infra/relay` with the normal Alchemy workflow:
+Deploy from `infra/cp` with the normal Alchemy workflow:
 
 ```sh
 vp run deploy
@@ -117,7 +117,7 @@ Questions these answer:
 ## Alerts
 
 The stack provisions threshold monitors and a `t3-code-relay-health` dashboard from
-[`infra/relay/src/monitoring.ts`](../../infra/relay/src/monitoring.ts) when the deployment sets
+[`infra/cp/src/monitoring.ts`](../../infra/cp/src/monitoring.ts) when the deployment sets
 `RELAY_ALERT_NOTIFIER_ID`. Paging monitors go to that notifier and need two failing runs in a row.
 Warnings go to `RELAY_WARNING_NOTIFIER_ID` when it is set and are otherwise only visible in Axiom.
 Each monitor's description gives its healthy baseline.
@@ -223,7 +223,7 @@ token needs **Account API Tokens: Edit** on the deploy token. Deploy output show
 it from state, where it is under `__redacted__`:
 
 ```sh
-cd infra/relay && vp exec alchemy state read T3CodeRelay/prod/output
+cd infra/cp && vp exec alchemy state read T3CodeRelay/prod/output
 ```
 
 Set it as a GitHub Actions secret, for OTA updates, and as an EAS environment variable with
@@ -237,7 +237,7 @@ stacks are symbolicated, and whether reports reach the relay at all. A crash cou
 native abort after a JS crash (`relay.crash.js_fatal`) is left out. Startup times are metrics, so
 they are not on it; query `t3-code-mobile-metrics-*` with MPL. Prod and PR previews get the
 dashboard, and deployments with `RELAY_ALERT_NOTIFIER_ID` get these monitors
-([`infra/relay/src/mobileTelemetry/monitoring.ts`](../../infra/relay/src/mobileTelemetry/monitoring.ts)):
+([`infra/cp/src/mobileTelemetry/monitoring.ts`](../../infra/cp/src/mobileTelemetry/monitoring.ts)):
 
 - **crash spike** (pages): crashes per 15 min well above the same time over the last 7 days. Until
   a week of data exists it has no baseline. A spike right after a release usually means a bad OTA

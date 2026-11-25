@@ -327,7 +327,7 @@ it.each([
   [`export CLOUDFLARE_API_TOKEN="$(cat ${F})"`, ["meta"]],
   [`export CLOUDFLARE_API_TOKEN="$(cat ${F})"; alchemy deploy`, ["meta", "consume"]],
   [
-    `export CLOUDFLARE_API_TOKEN="$(cat ${F})" && cd infra/relay && pnpm deploy:test`,
+    `export CLOUDFLARE_API_TOKEN="$(cat ${F})" && cd infra/cp && pnpm deploy:test`,
     ["meta", "consume"],
   ],
   [`/x/agent-device fill @e4 --text-stdin < ${F}`, ["consume"]],

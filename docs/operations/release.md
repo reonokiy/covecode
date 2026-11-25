@@ -100,13 +100,15 @@ The finalize job uses them to commit and push aligned package versions to `main`
 GitHub Release publication uses the repository-scoped workflow token so it has a rate-limit quota
 independent from the shared Release App installation.
 
-## T3 Connect relay deployment
+## cove-cp deployment
+
+For the self-hosted service, follow the [cove-cp deployment guide](../../infra/cp/README.md#docker-compose-deployment). The Alchemy workflow below describes the upstream hosted deployment.
 
 The relay is a shared control plane versioned separately from client releases. Stable and nightly
 client builds must point at the same relay so users see the same linked environments when switching
 release channels.
 
-`.github/workflows/deploy-relay.yml` deploys Alchemy stage `prod` on every push to `main`. Stable
+`.github/workflows/deploy-cove-cp.yml` deploys Alchemy stage `prod` on every push to `main`. Stable
 and nightly releases read the relay URL and Clerk client configuration from the existing
 `production` GitHub Actions environment before building desktop, CLI, or hosted web artifacts. That
 environment admits only `main` and `v*` tags, so preview releases, which may run from any branch,
@@ -158,7 +160,7 @@ Optional `production` environment secrets:
 - `T3CHAT_LINK_SECRET` for the T3 Chat account link. It must match
   `T3CODE_LINK_SECRET` on T3 Chat.
 
-After changing a variable or secret, run the **Deploy T3 Connect relay** workflow manually from
+After changing a variable or secret, run the **Deploy cove-cp** workflow manually from
 `main` with **force** unchecked. Alchemy compares the values the Worker reads and redeploys it when
 one changed. Check **force** only to redeploy resources with no detected change.
 
@@ -172,12 +174,12 @@ Personal stages reference the production-owned zones.
 Developers deploy personal stages locally:
 
 ```sh
-vp run --filter t3code-relay deploy -- --stage "$USER" --env-file .env.local
+vp run --filter cove-cp deploy -- --stage "$USER" --env-file .env.local
 ```
 
-A same-repository PR labeled `relay:preview` deploys stage `pr-<number>` through
-`.github/workflows/relay-preview.yml`, after approval in the `relay-preview` environment. Removing the
-label or closing the PR runs `.github/workflows/relay-preview-cleanup.yml`, which destroys the stage
+A same-repository PR labeled `cove-cp:preview` deploys stage `pr-<number>` through
+`.github/workflows/cove-cp-preview.yml`, after approval in the `relay-preview` environment. Removing the
+label or closing the PR runs `.github/workflows/cove-cp-preview-cleanup.yml`, which destroys the stage
 and sweeps its managed tunnels and DNS records. A nightly run destroys stages of closed labeled PRs
 whose teardown failed. Fork PRs get no preview.
 
@@ -226,7 +228,7 @@ Ship the web and mobile builds that show the offline reason before enabling lega
 user whose host is affected sees what to do. The relay adds the `tunnel_released_at` allocation
 column in its first deploy with this change; the legacy switch stays `off` until you set it.
 
-1. Run `vp run --filter t3code-relay tunnels:census` with a read-only Cloudflare token. It counts
+1. Run `vp run --filter cove-cp tunnels:census` with a read-only Cloudflare token. It counts
    tunnels in every relay stage. The reaper only sees its own stage's tunnels, so clean up the rest
    by hand.
 2. Set the legacy mode to `dry-run`, deploy, and read `wouldDeleteLegacy`, `legacyOver30Days`,
