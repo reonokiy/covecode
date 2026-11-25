@@ -61,11 +61,22 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
   };
 }
 
+const TRUE_TELEMETRY_FLAGS = new Set(["true", "yes", "on", "1", "y"]);
+
 let desktopRelayTelemetry: boolean | null = null;
 
-/** Whether relay spans may be exported now; the desktop host may not know yet at startup. */
+function isWebRelayTelemetryOptedIn(): boolean {
+  const raw = (import.meta.env.VITE_T3CODE_TELEMETRY_ENABLED as string | undefined)
+    ?.trim()
+    .toLowerCase();
+  return raw !== undefined && TRUE_TELEMETRY_FLAGS.has(raw);
+}
+
+/** Whether relay spans may be exported now; defaults off unless explicitly enabled. */
 export function relayTelemetryEnabled(): boolean | null {
-  if (typeof window === "undefined" || !window.desktopBridge) return true;
+  if (typeof window === "undefined" || !window.desktopBridge) {
+    return isWebRelayTelemetryOptedIn();
+  }
   desktopRelayTelemetry ??= window.desktopBridge.getRelayTelemetryEnabled();
   return desktopRelayTelemetry;
 }

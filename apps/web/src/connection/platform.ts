@@ -44,6 +44,7 @@ import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/http";
 
 import { APP_VERSION } from "../branding";
+import { relayTelemetryEnabled } from "../cloud/publicConfig";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import * as PrimaryEnvironmentHttpLayer from "../environments/primary/httpLayer";
 import {
@@ -350,17 +351,20 @@ export const prepareDesktopSshEnvironment = Effect.fn("web.connectionPlatform.ss
 
 const ANALYTICS_DEVICE_ID_KEY = "t3code:analytics-device-id";
 
-// Lives as long as this browser profile's site data. Storage can be blocked, which only drops the id.
+// Lives as long as this browser profile's site data. Only created when telemetry is opted in.
 const analyticsDevice = {
-  id: Effect.sync(
-    Option.liftThrowable(() => {
+  id: Effect.sync(() => {
+    if (relayTelemetryEnabled() !== true) {
+      return Option.none<string>();
+    }
+    return Option.liftThrowable(() => {
       const existing = window.localStorage.getItem(ANALYTICS_DEVICE_ID_KEY);
       if (existing) return existing;
       const created = randomUUID();
       window.localStorage.setItem(ANALYTICS_DEVICE_ID_KEY, created);
       return created;
-    }),
-  ),
+    })();
+  }),
 };
 
 const layerCapabilities = Layer.effectContext(

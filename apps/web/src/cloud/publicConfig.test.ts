@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { hasCloudPublicConfig } from "./publicConfig.ts";
+import {
+  hasCloudPublicConfig,
+  relayTelemetryEnabled,
+  resolveRelayTracingConfig,
+} from "./publicConfig.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -73,6 +77,26 @@ describe("hasCloudPublicConfig", () => {
       vi.stubGlobal("window", { location: new URL("file:///app/index.html"), desktopBridge: {} });
 
       expect(hasCloudPublicConfig()).toBe(true);
+    });
+  });
+});
+
+describe("relayTelemetryEnabled", () => {
+  it("defaults off in ordinary browsers and requires explicit opt-in", () => {
+    vi.stubGlobal("window", { location: new URL("https://example.com") });
+    vi.stubEnv("VITE_RELAY_OTLP_TRACES_URL", "https://telemetry.example.test/v1/traces");
+    vi.stubEnv("VITE_RELAY_OTLP_TRACES_DATASET", "relay-test");
+    vi.stubEnv("VITE_RELAY_OTLP_TRACES_TOKEN", "test-token");
+
+    expect(relayTelemetryEnabled()).toBe(false);
+    expect(resolveRelayTracingConfig()).toBeNull();
+
+    vi.stubEnv("VITE_T3CODE_TELEMETRY_ENABLED", "true");
+    expect(relayTelemetryEnabled()).toBe(true);
+    expect(resolveRelayTracingConfig()).toEqual({
+      tracesUrl: "https://telemetry.example.test/v1/traces",
+      tracesDataset: "relay-test",
+      tracesToken: "test-token",
     });
   });
 });

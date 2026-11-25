@@ -7,6 +7,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -436,6 +437,110 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AnalyticsService
       }).pipe(Effect.provide(layerRuntime));
 
       assert.deepEqual(capturedPaths, []);
+    }),
+  );
+
+  it.effect(
+    "defaults telemetry off without reading identity or writing anonymous-id, and never falls back to an upstream endpoint",
+    () =>
+      Effect.gen(function* () {
+        for (const envConfig of [
+          {},
+          { T3CODE_POSTHOG_KEY: "phc_test_key", T3CODE_POSTHOG_HOST: "http://localhost" },
+          { T3CODE_TELEMETRY_ENABLED: true },
+        ]) {
+          const requests: Array<string> = [];
+          const client = HttpClient.make((request) =>
+            Effect.sync(() => {
+              requests.push(request.url);
+              return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
+            }),
+          );
+          const layerServerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+            prefix: "t3-telemetry-default-off-",
+          });
+          const layerRuntime = AnalyticsService.layer.pipe(
+            Layer.provideMerge(layerServerConfig),
+            Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(envConfig))),
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(HostProcess.Platform, "linux"),
+                Layer.succeed(HostProcess.Architecture, "arm64"),
+                Layer.succeed(HttpClient.HttpClient, client),
+                ManagedPolicy.layerTest(),
+              ),
+            ),
+          );
+
+          yield* Effect.gen(function* () {
+            const analytics = yield* AnalyticsService.AnalyticsService;
+            const serverConfig = yield* ServerConfig.ServerConfig;
+            const fs = yield* FileSystem.FileSystem;
+
+            assert.isFalse(yield* analytics.isEnabled);
+            yield* analytics.record("test.default-off", { index: 1 });
+            yield* analytics.recordOwners(
+              [{ source: "connect", ownerId: "a".repeat(64) }],
+              "server",
+            );
+            yield* analytics.flush;
+            assert.isFalse(yield* fs.exists(serverConfig.anonymousIdPath));
+          }).pipe(Effect.provide(layerRuntime));
+
+          assert.deepEqual(requests, []);
+        }
+      }),
+  );
+
+  it.effect("keeps telemetry off when desktop shell discovery settles without opt-in", () =>
+    Effect.gen(function* () {
+      const env: NodeJS.ProcessEnv = { T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1" };
+      const requests: Array<string> = [];
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push(request.url);
+          return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
+        }),
+      );
+      const layerRuntime = AnalyticsService.layer.pipe(
+        Layer.provideMerge(
+          ServerConfig.ServerConfig.layerTest(process.cwd(), {
+            prefix: "t3-telemetry-shell-default-off-",
+          }),
+        ),
+        Layer.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              T3CODE_POSTHOG_KEY: "phc_test_key",
+              T3CODE_POSTHOG_HOST: "http://localhost",
+            }),
+          ),
+        ),
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(HostProcess.Platform, "darwin"),
+            Layer.succeed(HostProcess.Architecture, "arm64"),
+            Layer.succeed(HttpClient.HttpClient, client),
+            ManagedPolicy.layerTest(),
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        assert.isFalse(yield* analytics.isEnabled);
+        delete env.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING;
+        assert.isFalse(yield* analytics.isEnabled);
+        yield* analytics.record("test.shell-unset");
+        yield* analytics.flush;
+        assert.deepEqual(requests, []);
+
+        env.T3CODE_TELEMETRY_ENABLED = "true";
+        assert.isTrue(yield* analytics.isEnabled);
+        yield* analytics.record("test.shell-opted-in");
+        yield* analytics.flush;
+        assert.equal(requests.length, 1);
+      }).pipe(Effect.provide(layerRuntime), Effect.provideService(HostProcess.Environment, env));
     }),
   );
 });
