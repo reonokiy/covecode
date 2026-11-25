@@ -1,4 +1,3 @@
-import { useAuth, useClerk } from "@clerk/react";
 import { useAtomValue } from "@effect/atom-react";
 import { managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
 import {
@@ -9,14 +8,12 @@ import { type AuthMcpApprovalDetails, EnvironmentId } from "@t3tools/contracts";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { msg, T, useGT } from "gt-react";
-import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { m } from "../../i18n/messages";
 
-import { isElectron } from "../../env";
 import { runConnectMcpApproval } from "../../state/connectMcpApproval";
-import { resolveClerkSignInProps } from "../clerk/authRedirect";
-import { retryClerkLoad, useClerkLoadFailed } from "../clerk/clerkLoadFailure";
+import { useCloudAuth } from "../../cloud/oidcAuth";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
@@ -89,22 +86,16 @@ export function ApproveAgentSurface() {
   const [transport] = useState(() =>
     environmentId === null ? null : connectTransport(environmentId, setEnvironment),
   );
-  const clerk = useClerk();
-  const { isLoaded, isSignedIn } = useAuth();
-  const loadFailed = useClerkLoadFailed();
+  const { isLoaded, isSignedIn, loadFailed, signIn, signOut, retry } = useCloudAuth();
   const session = useAtomValue(managedRelaySessionAtom);
   const signInOpened = useRef(false);
 
-  const openSignIn = () =>
-    clerk.openSignIn(resolveClerkSignInProps(window.location.href, isElectron));
-  const openSignInOnLoad = useEffectEvent(openSignIn);
-
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens Clerk sign-in once Clerk has loaded and nobody is signed in
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts the OIDC redirect once the control plane config has loaded and nobody is signed in
   useEffect(() => {
     if (!isLoaded || isSignedIn || signInOpened.current || framed) return;
     signInOpened.current = true;
-    openSignInOnLoad();
-  }, [framed, isLoaded, isSignedIn]);
+    void signIn();
+  }, [framed, isLoaded, isSignedIn, signIn]);
 
   if (environmentId === null || transport === null) {
     return (
@@ -131,7 +122,7 @@ export function ApproveAgentSurface() {
         description={gt("T3 Connect sign-in did not load. Check your connection, then try again.")}
       >
         <div className="mt-6">
-          <Button type="button" onClick={retryClerkLoad}>
+          <Button type="button" onClick={retry}>
             <T>Retry sign-in</T>
           </Button>
         </div>
@@ -159,7 +150,7 @@ export function ApproveAgentSurface() {
         description={gt("Sign in to T3 Connect with the account this environment is linked to.")}
       >
         <div className="mt-6">
-          <Button type="button" onClick={openSignIn}>
+          <Button type="button" onClick={() => void signIn()}>
             <T>Sign in</T>
           </Button>
         </div>
@@ -188,12 +179,7 @@ export function ApproveAgentSurface() {
               <T>Use a sign-in code instead</T>
             </Button>
           ) : null}
-          <Button
-            size="sm"
-            variant="link"
-            onClick={() => void clerk.signOut({ redirectUrl: window.location.href })}
-            type="button"
-          >
+          <Button size="sm" variant="link" onClick={() => void signOut()} type="button">
             <T>Use another account</T>
           </Button>
         </div>

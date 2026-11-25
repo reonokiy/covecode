@@ -1,5 +1,3 @@
-import * as Alchemy from "alchemy";
-import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -26,6 +24,17 @@ import {
 } from "./apnsDeliveryJobs.ts";
 import * as RelayConfiguration from "../Config.ts";
 
+export class DeliveryQueueTransportError extends Schema.TaggedError<DeliveryQueueTransportError>()(
+  "DeliveryQueueTransportError",
+  {
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Delivery queue transport failed";
+  }
+}
+
 export class ApnsDeliveryQueueSendError extends Schema.TaggedError<ApnsDeliveryQueueSendError>()(
   "ApnsDeliveryQueueSendError",
   {
@@ -49,7 +58,7 @@ export class ApnsDeliveryQueueSender extends Context.Service<
   {
     readonly send: (
       body: SignedApnsDeliveryJob,
-    ) => Effect.Effect<void, Cloudflare.Queues.SendError>;
+    ) => Effect.Effect<void, DeliveryQueueTransportError>;
   }
 >()("t3code-relay/agentActivity/ApnsDeliveryQueue/ApnsDeliveryQueueSender") {}
 
@@ -106,9 +115,15 @@ const make = Effect.gen(function* () {
         );
         yield* Effect.annotateCurrentSpan({ "relay.delivery.job_id": jobId });
         const payload = makeApnsDeliveryJobPayload({
-          ...input,
+          kind: input.kind,
+          userId: input.userId,
+          deviceId: input.deviceId,
+          token: input.token,
+          bundleId: input.bundleId,
+          apsEnvironment: input.apsEnvironment,
           aggregate:
             input.aggregate === null ? null : sanitizeAgentActivityAggregateState(input.aggregate),
+          alert: input.alert ?? null,
           jobId,
           createdAt: DateTime.formatIso(now),
           expiresAt: expiresAtForJob(now.epochMilliseconds),
@@ -146,8 +161,6 @@ const make = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({
           "relay.mobile.device_id": input.deviceId,
           "relay.delivery.kind": "push_notification",
-          "relay.environment_id": input.notification.environmentId,
-          "relay.thread_id": input.notification.threadId,
         });
         const now = yield* DateTime.now;
         const jobId = yield* random.uuidV4().pipe(
@@ -210,22 +223,18 @@ const make = Effect.gen(function* () {
 
 export const layer = Layer.effect(ApnsDeliveryQueue, make);
 
-export const layerCloudflareQueues = (
-  sender: Cloudflare.Queues.WriteQueueClient,
-  alchemyRuntimeContext: Alchemy.BaseRuntimeContext,
+export const layerInProcess = (
+  send: (body: SignedApnsDeliveryJob) => Effect.Effect<void, DeliveryQueueTransportError>,
 ) =>
   layer.pipe(
     Layer.provide(
       Layer.succeed(
         ApnsDeliveryQueueSender,
         ApnsDeliveryQueueSender.of({
-          send: Effect.fn("ApnsDeliveryQueueSender.send")(
-            function* (body) {
-              return yield* sender.send(body);
-            },
-            Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
-          ),
+          send,
         }),
       ),
     ),
   );
+
+export const layerNoop = layerInProcess(() => Effect.void);

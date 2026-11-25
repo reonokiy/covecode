@@ -223,6 +223,10 @@
       "types": "./src/relayUrl.ts",
       "import": "./src/relayUrl.ts"
     },
+    "./oidc": {
+      "types": "./src/oidc.ts",
+      "import": "./src/oidc.ts"
+    },
     "./relayJwt": {
       "types": "./src/relayJwt.ts",
       "import": "./src/relayJwt.ts"

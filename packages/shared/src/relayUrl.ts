@@ -1,8 +1,19 @@
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/u, "$1");
+  return LOOPBACK_HOSTS.has(normalized);
+}
+
 export function normalizeSecureRelayUrl(value: string): string | null {
   try {
     const url = new URL(value.trim());
+    const isLoopbackHttp = url.protocol === "http:" && isLoopbackHostname(url.hostname);
     if (
-      url.protocol !== "https:" ||
+      (url.protocol !== "https:" && !isLoopbackHttp) ||
       url.username.length > 0 ||
       url.password.length > 0 ||
       url.search.length > 0 ||

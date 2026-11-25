@@ -51,7 +51,7 @@ describe("link proof provider kinds", () => {
   });
 
   it("only claims the managed-tunnel scope for tunnel links", () => {
-    expect(linkProofScopes(proofRequest("cloudflare_tunnel"))).toEqual([
+    expect(linkProofScopes(proofRequest("libp2p_tunnel"))).toEqual([
       "agent_activity_notifications",
       "managed_tunnels",
     ]);

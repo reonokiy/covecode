@@ -3,15 +3,12 @@ import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import * as Effect from "effect/Effect";
-import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
-import type * as Cloudflare from "@alchemy.run/cloudflare";
-import * as FcmDeliveryQueueConsumer from "./FcmDeliveryQueueConsumer.ts";
 
 import * as RelayConfiguration from "../Config.ts";
+import { makeTestRelayConfiguration } from "../testConfig.ts";
 import * as RelayDb from "../db.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as AgentActivityRows from "./AgentActivityRows.ts";
@@ -63,25 +60,10 @@ const target: LiveActivities.TargetRow = {
   last_aggregate_json: null,
   last_live_activity_delivery_at: null,
 };
-const config = {
+const config = makeTestRelayConfiguration({
   relayIssuer: "https://relay.test",
   fcmServiceAccount: Redacted.make("configured"),
-  apns: {
-    environment: "sandbox",
-    teamId: "unused",
-    keyId: "unused",
-    bundleId: "unused",
-    privateKey: Redacted.make("unused"),
-  },
-  clerkSecretKey: Redacted.make("unused"),
-  clerkPublishableKey: "unused",
-  clerkJwtAudience: "unused",
-  apnsDeliveryJobSigningSecret: Redacted.make("unused"),
-  cloudMintPrivateKey: Redacted.make("unused"),
-  cloudMintPublicKey: "unused",
-  managedEndpointBaseDomain: undefined,
-  managedEndpointNamespace: undefined,
-} satisfies RelayConfiguration.RelayConfiguration["Service"];
+});
 
 function harness() {
   const sent: Array<Parameters<FcmClient.FcmClient["Service"]["send"]>[0]> = [];
@@ -625,46 +607,24 @@ it("stops reducing five-character row fields and fits the remaining alert", () =
   expect(new TextEncoder().encode(encodeJson(data)).length).toBeLessThanOrEqual(3800);
 });
 
-describe("FCM queue message isolation", () => {
+describe("FCM job processing isolation", () => {
   it.effect.each(["invalid-job", "fcm-rejection"] as const)(
-    "retries only the %s message and delivers the rest of its batch",
+    "fails only on the %s job while healthy jobs deliver normally",
     (failure) => {
       const h = harness();
-      const outcomes = new Map<string, "ack" | "retry">();
-      const message = (id: string, body: unknown): Cloudflare.Queues.Message<unknown> => ({
-        id,
-        body,
-        timestamp: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
-        attempts: 1,
-        ack: () => {
-          if (!outcomes.has(id)) outcomes.set(id, "ack");
-        },
-        retry: () => {
-          if (!outcomes.has(id)) outcomes.set(id, "retry");
-        },
-      });
-      const batch = [
-        message("failed", failure === "invalid-job" ? {} : h.job),
-        message("healthy", h.job),
-      ];
       return Effect.gen(function* () {
-        yield* Stream.fromIterable(batch).pipe(
-          Stream.tap((item) =>
-            Effect.sync(() => {
-              h.current.deliveryFailure =
-                item.id === "failed" && failure === "fcm-rejection"
-                  ? new FcmClient.FcmClientError({ operation: "send", status: 400 })
-                  : null;
-            }),
-          ),
-          Stream.runForEach(FcmDeliveryQueueConsumer.processMessage),
+        const deliveries = yield* FcmDeliveries.FcmDeliveries;
+        h.current.deliveryFailure =
+          failure === "fcm-rejection"
+            ? new FcmClient.FcmClientError({ operation: "send", status: 400 })
+            : null;
+        const failed = yield* Effect.flip(
+          deliveries.process(failure === "invalid-job" ? {} : h.job),
         );
-        // Cloudflare ignores Alchemy's final batch acknowledgements for already-retried messages.
-        for (const item of batch) item.ack();
-        expect([...outcomes]).toEqual([
-          ["failed", "retry"],
-          ["healthy", "ack"],
-        ]);
+        expect(failed).toBeDefined();
+
+        h.current.deliveryFailure = null;
+        yield* deliveries.process(h.job);
         expect(h.sent).toHaveLength(1);
         expect(h.marked).toHaveLength(1);
       }).pipe(Effect.provide(h.layer));

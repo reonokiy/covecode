@@ -667,7 +667,7 @@ const make = Effect.gen(function* () {
           ) {
             return null;
           }
-          const status = yield* endpointRuntime.applyConfig(input.config);
+          const status = yield* endpointRuntime.applyConfig(input.config, { origin: input.origin });
           if (status.status !== "running") {
             return yield* new CloudLinkEndpointUnavailableError({
               reason: "runtime-not-started",
@@ -729,7 +729,7 @@ const make = Effect.gen(function* () {
         ]);
         if (Option.isNone(runtimeBytes)) return false;
         const config = Option.getOrNull(decodeRuntimeConfig(bytesToString(runtimeBytes.value)));
-        if (config === null || config.providerKind !== "cloudflare_tunnel") return false;
+        if (config === null || config.providerKind !== "libp2p_tunnel") return false;
         // Require the relay-confirmed port unless falling back after the relay stayed unreachable.
         if (requireConfirmedOrigin) {
           if (Option.isNone(markerBytes)) return false;
@@ -743,7 +743,9 @@ const make = Effect.gen(function* () {
             return false;
           }
         }
-        const status = yield* endpointRuntime.applyConfig(config);
+        const status = yield* endpointRuntime.applyConfig(config, {
+          origin: parsedOrigin.origin,
+        });
         if (status.status !== "running") {
           return yield* new CloudLinkEndpointUnavailableError({
             reason: "runtime-not-started",
@@ -769,7 +771,7 @@ const make = Effect.gen(function* () {
       // Reject unsupported runtimes before they can stop a healthy tunnel.
       if (
         payload.endpointRuntime !== null &&
-        payload.endpointRuntime.providerKind !== "cloudflare_tunnel"
+        payload.endpointRuntime.providerKind !== "libp2p_tunnel"
       ) {
         return yield* new CloudLinkEndpointUnavailableError({
           reason: "runtime-not-started",
@@ -829,7 +831,9 @@ const make = Effect.gen(function* () {
           endpointRuntimeStatus: { status: "disabled" },
         } satisfies EnvironmentCloudRelayConfigResult;
       }
-      const endpointRuntimeStatus = yield* endpointRuntime.applyConfig(payload.endpointRuntime);
+      const endpointRuntimeStatus = yield* endpointRuntime.applyConfig(payload.endpointRuntime, {
+        origin: options.confirmedOrigin,
+      });
       if (endpointRuntimeStatus.status !== "running") {
         return yield* new CloudLinkEndpointUnavailableError({
           reason: "runtime-not-started",
@@ -878,12 +882,13 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+      const bearerToken = CliTokenManager.relayBearerToken(token);
       const mode = yield* readCliDesiredLinkMode.pipe(withSecrets);
       const managedTunnelsEnabled = mode !== "publish_only";
       const relayUrl = yield* requireRelayUrl;
       const challenge = yield* relayClientRequest({
         url: `${relayUrl}/v1/client/environment-link-challenges`,
-        token: token.accessToken,
+        token: bearerToken,
         payload: {
           notificationsEnabled: true,
           liveActivitiesEnabled: true,
@@ -897,13 +902,13 @@ const make = Effect.gen(function* () {
         endpoint: {
           httpBaseUrl: parsedOrigin.httpBaseUrl,
           wsBaseUrl: parsedOrigin.wsBaseUrl,
-          providerKind: managedTunnelsEnabled ? "cloudflare_tunnel" : "manual",
+          providerKind: managedTunnelsEnabled ? "libp2p_tunnel" : "manual",
         },
         origin: parsedOrigin.origin,
       });
       const link = yield* relayClientRequest({
         url: `${relayUrl}/v1/client/environment-links`,
-        token: token.accessToken,
+        token: bearerToken,
         payload: {
           proof,
           notificationsEnabled: true,
@@ -1022,7 +1027,7 @@ const make = Effect.gen(function* () {
     }
 
     const config = Option.getOrNull(decodeRuntimeConfig(bytesToString(runtimeConfig.value)));
-    if (config?.providerKind !== "cloudflare_tunnel") {
+    if (config?.providerKind !== "libp2p_tunnel") {
       return { status: "not_linked" as const };
     }
 
@@ -1107,13 +1112,7 @@ const make = Effect.gen(function* () {
     }
     if (expectedConfig !== undefined) {
       const current = Option.getOrNull(decodeRuntimeConfig(bytesToString(runtimeConfig.value)));
-      if (
-        current === null ||
-        current.providerKind !== expectedConfig.providerKind ||
-        current.connectorToken !== expectedConfig.connectorToken ||
-        current.tunnelId !== expectedConfig.tunnelId ||
-        current.tunnelName !== expectedConfig.tunnelName
-      ) {
+      if (current === null || !managedEndpointRuntimeConfigsMatch(current, expectedConfig)) {
         return false;
       }
     }
@@ -1150,7 +1149,7 @@ const make = Effect.gen(function* () {
         error.rejection === "unauthorized" ? markLinkRevoked(credential, error) : Effect.void,
       ),
     );
-    if (recovered.endpointRuntime.providerKind !== "cloudflare_tunnel") {
+    if (recovered.endpointRuntime.providerKind !== "libp2p_tunnel") {
       return yield* new CloudLinkInternalError({ operation: "unsupported-recovered-tunnel" });
     }
 
@@ -1189,7 +1188,7 @@ const make = Effect.gen(function* () {
   const applyRelayConfig = Effect.fn("environment.cloud.relayConfig")(
     function* (payload: RelayEnvironmentConfigRequest) {
       const result = yield* applyCloudRelayConfig(payload, { replaceRevokedLink: true });
-      if (payload.endpointRuntime?.providerKind === "cloudflare_tunnel") {
+      if (payload.endpointRuntime?.providerKind === "libp2p_tunnel") {
         const address = httpServer.address;
         if (typeof address === "string" || !("port" in address)) {
           return yield* new CloudLinkInternalError({ operation: "resolve-server-origin" });
@@ -1228,7 +1227,7 @@ const make = Effect.gen(function* () {
     }),
   );
 
-  // Cloudflare bills provisioned tunnels even while environments are offline.
+  // Release managed tunnels cleanly when shutting down so idle tunnels are removed promptly.
   const releaseManagedTunnelOnShutdown = Effect.fn(
     "environment.cloud.releaseManagedTunnelOnShutdown",
   )(function* () {
@@ -1269,7 +1268,7 @@ const make = Effect.gen(function* () {
     const response = yield* HttpClientRequest.delete(
       `${relayUrl.value}/v1/client/environment-links/${encodeURIComponent(environmentId)}/tunnel`,
     ).pipe(
-      HttpClientRequest.bearerToken(token.value.accessToken),
+      HttpClientRequest.bearerToken(CliTokenManager.relayBearerToken(token.value)),
       httpClient.execute,
       Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
       Effect.flatMap(filterRelayResponse),
@@ -1315,7 +1314,7 @@ const make = Effect.gen(function* () {
       ],
       { concurrency: 8 },
     );
-    // The hostname arrives once cloudflared connects, before any check passes.
+    // The hostname arrives once the libp2p connector is started, before any check passes.
     const connector = Option.isSome(endpointRuntimeConfig)
       ? yield* endpointRuntime.inspectConnector
       : null;

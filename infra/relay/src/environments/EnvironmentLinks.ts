@@ -410,7 +410,7 @@ const make = Effect.gen(function* () {
           and(
             eq(relayEnvironmentLinks.environmentId, input.environmentId),
             isNull(relayEnvironmentLinks.revokedAt),
-            eq(relayEnvironmentLinks.endpointProviderKind, "cloudflare_tunnel"),
+            eq(relayEnvironmentLinks.endpointProviderKind, "libp2p_tunnel"),
             eq(relayEnvironmentLinks.managedTunnelsEnabled, true),
             input.userId === undefined ? undefined : eq(relayEnvironmentLinks.userId, input.userId),
             input.environmentPublicKey === undefined

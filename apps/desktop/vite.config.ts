@@ -125,7 +125,7 @@ export default defineConfig({
       entry: ["src/preload.ts"],
       deps: {
         // Sandboxed preloads cannot resolve imports inside ASAR; bundle Clerk's bridge.
-        alwaysBundle: (id) => id === "@clerk/electron" || id.startsWith("@clerk/electron/"),
+        alwaysBundle: () => false,
       },
     },
     {

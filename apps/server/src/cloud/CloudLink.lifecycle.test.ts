@@ -215,10 +215,11 @@ describe("releaseManagedTunnelOnShutdown", () => {
                     } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus)
                   : ({
                       status: "running",
-                      providerKind: "cloudflare_tunnel",
+                      providerKind: "libp2p_tunnel",
                       pid: 123,
                     } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus);
               }),
+            setLocalOrigin: () => Effect.void,
             recoveryRequests: Stream.empty,
             requestRecovery: () => Effect.void,
             restartConnector: () => Effect.succeed(false),
@@ -539,7 +540,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     const { store } = makeMemorySecretStore([
       [
         CLOUD_ENDPOINT_RUNTIME_CONFIG,
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
+        '{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
       ],
       [RELAY_URL_SECRET, "https://relay.example.test"],
       [CLOUD_LINKED_USER_ID, "user-123"],
@@ -584,7 +585,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
   it.effect("registers and starts a managed tunnel at the bound IPv6 loopback address", () => {
     const { store } = makeMemorySecretStore();
     const config = {
-      providerKind: "cloudflare_tunnel" as const,
+      providerKind: "libp2p_tunnel" as const,
       connectorToken: "existing-token",
       tunnelId: "existing-tunnel",
     };
@@ -627,7 +628,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     const { store, values } = makeMemorySecretStore([
       [
         CLOUD_ENDPOINT_RUNTIME_CONFIG,
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
+        '{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
       ],
       [RELAY_URL_SECRET, "https://relay.example.test"],
       [CLOUD_LINKED_USER_ID, "user-123"],
@@ -671,7 +672,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     const { store, values } = makeMemorySecretStore([
       [
         CLOUD_ENDPOINT_RUNTIME_CONFIG,
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
+        '{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
       ],
       [RELAY_URL_SECRET, "https://relay.example.test"],
       [CLOUD_LINKED_USER_ID, "user-123"],
@@ -825,9 +826,9 @@ describe("releaseManagedTunnelOnShutdown", () => {
     "starts a connector with a marker for the current origin without contacting relay",
     () => {
       const configJson =
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}';
+        '{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}';
       const config = {
-        providerKind: "cloudflare_tunnel" as const,
+        providerKind: "libp2p_tunnel" as const,
         connectorToken: "existing-token",
         tunnelId: "existing-tunnel",
       };
@@ -855,14 +856,14 @@ describe("releaseManagedTunnelOnShutdown", () => {
     {
       name: "stale",
       marker:
-        '{"config":{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"},"origin":{"localHttpHost":"127.0.0.1","localHttpPort":3773}}',
+        '{"config":{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"},"origin":{"localHttpHost":"127.0.0.1","localHttpPort":3773}}',
       origin: "http://127.0.0.1:4884",
     },
   ])("does not start a connector with a $name origin marker", ({ marker, origin }) => {
     const entries: Array<readonly [string, string]> = [
       [
         CLOUD_ENDPOINT_RUNTIME_CONFIG,
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
+        '{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
       ],
     ];
     if (marker !== undefined) entries.push([CLOUD_ENDPOINT_CONFIRMED_ORIGIN, marker]);
@@ -883,7 +884,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     "starts the stored connector without a marker when confirmation is not required",
     () => {
       const config = {
-        providerKind: "cloudflare_tunnel" as const,
+        providerKind: "libp2p_tunnel" as const,
         connectorToken: "existing-token",
         tunnelId: "existing-tunnel",
       };
@@ -910,7 +911,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     "does not activate a tunnel when its runtime config is %s during registration",
     (mutation) => {
       const originalConfig =
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}';
+        '{"providerKind":"libp2p_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}';
       const { store, values } = makeMemorySecretStore([
         [CLOUD_ENDPOINT_RUNTIME_CONFIG, originalConfig],
         [RELAY_URL_SECRET, "https://relay.example.test"],
@@ -937,7 +938,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
               values.set(
                 CLOUD_ENDPOINT_RUNTIME_CONFIG,
                 new TextEncoder().encode(
-                  '{"providerKind":"cloudflare_tunnel","connectorToken":"fresh-token","tunnelId":"fresh-tunnel"}',
+                  '{"providerKind":"libp2p_tunnel","connectorToken":"fresh-token","tunnelId":"fresh-tunnel"}',
                 ),
               );
             } else {
@@ -952,10 +953,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
 
   it.effect("requests startup recovery for a legacy config without a recorded tunnel ID", () => {
     const { store } = makeMemorySecretStore([
-      [
-        CLOUD_ENDPOINT_RUNTIME_CONFIG,
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"token"}',
-      ],
+      [CLOUD_ENDPOINT_RUNTIME_CONFIG, '{"providerKind":"libp2p_tunnel","connectorToken":"token"}'],
       [RELAY_URL_SECRET, "https://relay.example.test"],
       [CLOUD_LINKED_USER_ID, "user-123"],
       [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "environment-credential"],
@@ -968,7 +966,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
       const registration = yield* link.registerManagedTunnelRecovery("http://127.0.0.1:3773");
       expect(registration).toEqual({
         status: "recovery_required",
-        config: { providerKind: "cloudflare_tunnel", connectorToken: "token" },
+        config: { providerKind: "libp2p_tunnel", connectorToken: "token" },
       });
       expect(
         managedTunnelStartupAction({
@@ -977,7 +975,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
         }),
       ).toEqual({
         action: "request_recovery",
-        config: { providerKind: "cloudflare_tunnel", connectorToken: "token" },
+        config: { providerKind: "libp2p_tunnel", connectorToken: "token" },
       });
       expect(requests).toEqual([]);
       expect(applyConfigCalls).toEqual([]);
@@ -986,9 +984,9 @@ describe("releaseManagedTunnelOnShutdown", () => {
 
   it.effect("recovers a web-linked tunnel and clears its revoked mark", () => {
     const oldConfig =
-      '{"providerKind":"cloudflare_tunnel","connectorToken":"old-token","tunnelId":"old-tunnel"}';
+      '{"providerKind":"libp2p_tunnel","connectorToken":"old-token","tunnelId":"old-tunnel"}';
     const nextConfig = {
-      providerKind: "cloudflare_tunnel",
+      providerKind: "libp2p_tunnel",
       connectorToken: "new-token",
       tunnelId: "new-tunnel",
     } as const;
@@ -1026,7 +1024,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
             endpoint: {
               httpBaseUrl: "https://environment.example.test/",
               wsBaseUrl: "wss://environment.example.test/ws",
-              providerKind: "cloudflare_tunnel",
+              providerKind: "libp2p_tunnel",
             },
             endpointRuntime: nextConfig,
           }),
@@ -1054,7 +1052,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     const { store } = makeMemorySecretStore([
       [
         CLOUD_ENDPOINT_RUNTIME_CONFIG,
-        '{"providerKind":"cloudflare_tunnel","connectorToken":"current-token","tunnelId":"current-tunnel"}',
+        '{"providerKind":"libp2p_tunnel","connectorToken":"current-token","tunnelId":"current-tunnel"}',
       ],
       [RELAY_URL_SECRET, "https://relay.example.test"],
       [CLOUD_LINKED_USER_ID, "user-123"],
@@ -1067,7 +1065,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
       const link = yield* CloudLink.CloudLink;
       expect(
         yield* link.recoverManagedTunnel("http://127.0.0.1:3773", {
-          providerKind: "cloudflare_tunnel",
+          providerKind: "libp2p_tunnel",
           connectorToken: "old-token",
           tunnelId: "old-tunnel",
         }),
@@ -1180,10 +1178,10 @@ describe("releaseManagedTunnelOnShutdown", () => {
             endpoint: {
               httpBaseUrl: "https://environment.example.test/",
               wsBaseUrl: "wss://environment.example.test/ws",
-              providerKind: "cloudflare_tunnel",
+              providerKind: "libp2p_tunnel",
             },
             endpointRuntime: {
-              providerKind: "cloudflare_tunnel",
+              providerKind: "libp2p_tunnel",
               connectorToken: "replacement-token",
             },
           });
@@ -1288,8 +1286,8 @@ describe("releaseManagedTunnelOnShutdown", () => {
     const reachable = {
       status: "reachable" as const,
       checkedAt: "2026-10-29T00:00:00.000Z",
-      readyConnections: 4,
-      protocol: "quic",
+      readyConnections: 1,
+      protocol: "libp2p",
     };
 
     return Effect.gen(function* () {

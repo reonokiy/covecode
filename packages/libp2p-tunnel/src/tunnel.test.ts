@@ -1,0 +1,315 @@
+import * as NodeHttp from "node:http";
+import type * as NodeNet from "node:net";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+import { WebSocket, WebSocketServer } from "ws";
+
+import {
+  createClientLibp2pProxy,
+  createEnvironmentLibp2pTunnel,
+  createRelayLibp2pNode,
+  isAllowedLoopbackHost,
+  TunnelRegistrationUnauthorizedError,
+} from "./index.ts";
+
+interface OriginFixture {
+  readonly port: number;
+  readonly close: () => Promise<void>;
+}
+
+async function startOriginFixture(): Promise<OriginFixture> {
+  const wss = new WebSocketServer({ noServer: true });
+  wss.on("connection", (ws, req) => {
+    ws.send(JSON.stringify({ type: "welcome", url: req.url ?? "/" }));
+    ws.on("message", (data, isBinary) => {
+      const text = isBinary ? Buffer.from(data as Buffer).toString("utf8") : String(data);
+      ws.send(`echo:${text}`);
+    });
+  });
+
+  const server = NodeHttp.createServer(async (req, res) => {
+    if (req.url === "/healthz") {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.setHeader("x-origin-header", "from-origin");
+      res.end(JSON.stringify({ ok: true, method: req.method, path: req.url }));
+      return;
+    }
+
+    if (req.method === "POST" && req.url?.startsWith("/echo")) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const bodyText = Buffer.concat(chunks).toString("utf8");
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          url: req.url,
+          customHeader: req.headers["x-cove-test"] ?? null,
+          body: JSON.parse(bodyText) as unknown,
+        }),
+      );
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end("not found");
+  });
+
+  server.on("upgrade", (req, socket, head) => {
+    if (!req.url?.startsWith("/ws")) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
+
+  const address = server.address() as NodeNet.AddressInfo;
+  return {
+    port: address.port,
+    close: async () => {
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+async function startGatewayHttpServer(options: {
+  readonly endpointKey: string;
+  readonly stripPathPrefix: string;
+  readonly relay: Awaited<ReturnType<typeof createRelayLibp2pNode>>;
+}) {
+  const server = NodeHttp.createServer((req, res) => {
+    void options.relay.proxyHttpRequest(options.endpointKey, req, res, {
+      stripPathPrefix: options.stripPathPrefix,
+    });
+  });
+  server.on("upgrade", (req, socket, head) => {
+    void options.relay.proxyUpgrade(options.endpointKey, req, socket, head, {
+      stripPathPrefix: options.stripPathPrefix,
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as NodeNet.AddressInfo;
+  return {
+    httpBaseUrl: `http://127.0.0.1:${address.port}${options.stripPathPrefix}`,
+    wsBaseUrl: `ws://127.0.0.1:${address.port}${options.stripPathPrefix}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+describe("libp2p-tunnel", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    while (cleanups.length > 0) {
+      const fn = cleanups.pop();
+      if (fn) {
+        await fn();
+      }
+    }
+  });
+
+  it("validates loopback origin hosts", () => {
+    expect(isAllowedLoopbackHost("127.0.0.1")).toBe(true);
+    expect(isAllowedLoopbackHost("localhost")).toBe(true);
+    expect(isAllowedLoopbackHost("::1")).toBe(true);
+    expect(isAllowedLoopbackHost("10.0.0.5")).toBe(false);
+    expect(isAllowedLoopbackHost("example.com")).toBe(false);
+  });
+
+  it("rejects non-loopback localHost in createEnvironmentLibp2pTunnel", async () => {
+    await expect(
+      createEnvironmentLibp2pTunnel({
+        relayMultiaddrs: ["/ip4/127.0.0.1/tcp/12345/ws"],
+        endpointId: "env-1",
+        endpointKey: "key-1",
+        connectorToken: "secret",
+        localHost: "192.168.1.50",
+        localPort: 3773,
+      }),
+    ).rejects.toThrow(/non-loopback/u);
+  });
+
+  it("rejects unauthorized tunnel registrations", async () => {
+    const relay = await createRelayLibp2pNode({
+      listenMultiaddrs: ["/ip4/127.0.0.1/tcp/0/ws"],
+      validateRegistration: () => false,
+    });
+    cleanups.push(() => relay.stop());
+
+    await expect(
+      createEnvironmentLibp2pTunnel({
+        relayMultiaddrs: relay.getMultiaddrs(),
+        endpointId: "env-unauth",
+        endpointKey: "unauth-key",
+        connectorToken: "wrong-token",
+        localHost: "127.0.0.1",
+        localPort: 39999,
+        enableP2p: false,
+      }),
+    ).rejects.toBeInstanceOf(TunnelRegistrationUnauthorizedError);
+
+    expect(relay.isEndpointConnected("unauth-key")).toBe(false);
+  });
+
+  it("proxies HTTP requests, headers, POST bodies, and WebSockets with path prefix stripping", async () => {
+    const origin = await startOriginFixture();
+    cleanups.push(() => origin.close());
+
+    const relay = await createRelayLibp2pNode({
+      listenMultiaddrs: ["/ip4/127.0.0.1/tcp/0/ws", "/ip4/127.0.0.1/tcp/0"],
+      validateRegistration: (input) =>
+        input.endpointId === "env-1" &&
+        input.endpointKey === "abc123" &&
+        input.connectorToken === "good-token",
+    });
+    cleanups.push(() => relay.stop());
+
+    const tunnel = await createEnvironmentLibp2pTunnel({
+      relayMultiaddrs: relay.getMultiaddrs(),
+      endpointId: "env-1",
+      endpointKey: "abc123",
+      connectorToken: "good-token",
+      localHost: "127.0.0.1",
+      localPort: origin.port,
+    });
+    cleanups.push(() => tunnel.stop());
+
+    expect(relay.isEndpointConnected("abc123")).toBe(true);
+    expect(relay.getEndpointRegistration("abc123")?.peerId).toBe(tunnel.peerId);
+
+    const gateway = await startGatewayHttpServer({
+      endpointKey: "abc123",
+      stripPathPrefix: "/t/abc123",
+      relay,
+    });
+    cleanups.push(() => gateway.close());
+
+    const getResponse = await fetch(`${gateway.httpBaseUrl}/healthz`);
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.headers.get("x-origin-header")).toBe("from-origin");
+    expect(await getResponse.json()).toEqual({ ok: true, method: "GET", path: "/healthz" });
+
+    const postResponse = await fetch(`${gateway.httpBaseUrl}/echo?foo=bar`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-cove-test": "hello-p2p",
+      },
+      body: JSON.stringify({ payload: 42 }),
+    });
+    expect(postResponse.status).toBe(201);
+    expect(await postResponse.json()).toEqual({
+      url: "/echo?foo=bar",
+      customHeader: "hello-p2p",
+      body: { payload: 42 },
+    });
+
+    const wsMessages = await new Promise<string[]>((resolve, reject) => {
+      const ws = new WebSocket(`${gateway.wsBaseUrl}/ws?token=xyz`);
+      const received: string[] = [];
+      ws.once("error", reject);
+      ws.on("message", (data) => {
+        received.push(String(data));
+        if (received.length === 1) {
+          ws.send("ping-from-client");
+        } else if (received.length === 2) {
+          ws.close();
+          resolve(received);
+        }
+      });
+    });
+
+    expect(JSON.parse(wsMessages[0] ?? "{}")).toEqual({
+      type: "welcome",
+      url: "/ws?token=xyz",
+    });
+    expect(wsMessages[1]).toBe("echo:ping-from-client");
+  });
+
+  it("proxies HTTP and WebSockets via createClientLibp2pProxy in both relay and p2p modes", async () => {
+    const origin = await startOriginFixture();
+    cleanups.push(() => origin.close());
+
+    const relay = await createRelayLibp2pNode({
+      listenMultiaddrs: ["/ip4/127.0.0.1/tcp/0/ws", "/ip4/127.0.0.1/tcp/0"],
+      validateRegistration: () => true,
+    });
+    cleanups.push(() => relay.stop());
+
+    const tunnel = await createEnvironmentLibp2pTunnel({
+      relayMultiaddrs: relay.getMultiaddrs(),
+      endpointId: "env-p2p",
+      endpointKey: "p2p-key",
+      connectorToken: "token",
+      localHost: "127.0.0.1",
+      localPort: origin.port,
+      enableP2p: true,
+    });
+    cleanups.push(() => tunnel.stop());
+
+    const circuitAddrs = await tunnel.waitForRelayReservation(10_000);
+    expect(circuitAddrs.some((addr) => addr.includes("/p2p-circuit"))).toBe(true);
+
+    const relayProxy = await createClientLibp2pProxy({
+      relayMultiaddrs: relay.getMultiaddrs(),
+      targetPeerId: tunnel.peerId,
+      mode: "relay",
+    });
+    cleanups.push(() => relayProxy.stop());
+
+    const transportRelay = await relayProxy.connect();
+    expect(transportRelay).toBe("relay");
+
+    const relayRes = await fetch(`${relayProxy.httpBaseUrl}/healthz`);
+    expect(relayRes.status).toBe(200);
+    expect(await relayRes.json()).toEqual({ ok: true, method: "GET", path: "/healthz" });
+
+    const p2pProxy = await createClientLibp2pProxy({
+      relayMultiaddrs: relay.getMultiaddrs(),
+      targetPeerId: tunnel.peerId,
+      mode: "p2p",
+    });
+    cleanups.push(() => p2pProxy.stop());
+
+    const transportP2p = await p2pProxy.connect();
+    expect(["relay", "direct"]).toContain(transportP2p);
+
+    const p2pWsReply = await new Promise<string>((resolve, reject) => {
+      const ws = new WebSocket(`${p2pProxy.wsBaseUrl}/ws?mode=p2p`);
+      let count = 0;
+      ws.once("error", reject);
+      ws.on("message", (data) => {
+        count += 1;
+        if (count === 1) {
+          ws.send("hello-dcutr");
+        } else {
+          ws.close();
+          resolve(String(data));
+        }
+      });
+    });
+    expect(p2pWsReply).toBe("echo:hello-dcutr");
+  });
+});

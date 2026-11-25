@@ -20,7 +20,7 @@ export function guardHttpResponseWriteErrors<T extends NodeHttp.Server>(
   return server;
 }
 
-// cloudflared and Tailscale serve keep an idle connection to this server for 90
+// Tunnel proxies and Tailscale serve keep an idle connection to this server for 90
 // seconds. Node's 5 second default closes it first, so they can send a request
 // into a closed connection, and a slow client reconnects in the middle of a connect.
 const HTTP_KEEP_ALIVE_TIMEOUT_MS = 95_000;

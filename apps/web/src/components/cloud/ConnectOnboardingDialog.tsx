@@ -1,4 +1,4 @@
-import { useAuth } from "@clerk/react";
+import { useCloudAuth } from "../../cloud/oidcAuth";
 import { useAtomValue } from "@effect/atom-react";
 import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels";
 import {
@@ -69,8 +69,7 @@ function canPublishOnEnvironment(id: EnvironmentId | null): boolean {
 }
 
 function ConfiguredConnectOnboardingDialog() {
-  // Pending Clerk sessions must not look signed out or activation would look like a new sign-in.
-  const { isLoaded, isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false });
+  const { isLoaded, isSignedIn, userId } = useCloudAuth();
   const gt = useGT();
   const m = useMessages();
   const [optOutState, setOptOutState] = useLocalStorage(
@@ -234,7 +233,7 @@ function ConfiguredConnectOnboardingDialog() {
   };
 
   const openAccountPage = accountPage.open;
-  // The account page is a Clerk modal, so close this dialog before it opens.
+  // The account page is its own dialog, so close this one before it opens.
   const leaveForAccountPage = openAccountPage
     ? (page: T3ConnectAccountPageUrl) => {
         complete();

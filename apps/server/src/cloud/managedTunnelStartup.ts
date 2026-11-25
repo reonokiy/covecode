@@ -113,7 +113,7 @@ export const retryManagedTunnelRegistration = <A, E, R>(
 /**
  * Relinks a desired link at startup. Past the retry window it keeps going only
  * while the relay itself is unavailable: a headless host has nobody to restart
- * it once the relay recovers, but a local failure (cloudflared that cannot run)
+ * it once the relay recovers, but a local failure (tunnel connector that cannot run)
  * would otherwise relink, and provision a tunnel, forever.
  */
 export const retryDesiredLinkReconcile = <A, E, R>(
@@ -162,7 +162,7 @@ function nextManagedTunnelRecoveryCooldown(input: {
 
 // Existing hosts register on their first boot after an upgrade, and desktop
 // auto-update delivers that boot to many hosts at once. Spread the first
-// registration so the relay and Cloudflare see a ramp instead of a spike.
+// registration so the relay sees a ramp instead of a spike.
 export const MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER = Duration.seconds(30);
 
 /**
@@ -234,7 +234,7 @@ export const watchManagedTunnelOrigin = Effect.fn("ManagedTunnelOrigin.watch")(f
   R,
 >(options: {
   readonly localOrigin: string;
-  /** The service URL cloudflared routes the public hostname to, or `null` while unknown. */
+  /** The local service URL the libp2p connector routes requests to, or `null` while unknown. */
   readonly readIngressOrigin: Effect.Effect<string | null>;
   readonly register: Effect.Effect<unknown, E, R>;
 }) {

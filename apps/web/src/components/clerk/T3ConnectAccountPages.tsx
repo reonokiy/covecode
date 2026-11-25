@@ -1,14 +1,16 @@
-import { useAuth, useClerk } from "@clerk/react";
 import { MessageSquareIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
 import { msg, useMessages } from "gt-react";
 import { type ReactNode, useState } from "react";
-import { createPortal } from "react-dom";
 
+import { useCloudAuth } from "../../cloud/oidcAuth";
+import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
+import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
 import { T3ChatUserProfilePage } from "./T3ChatUserProfilePage";
 import { T3ConnectUserProfilePage } from "./T3ConnectUserProfilePage";
 
-export const T3_CONNECT_ACCOUNT_PAGES = [
+const T3_CONNECT_ACCOUNT_PAGES = [
   {
     label: msg("Mobile clients"),
     url: "mobile-clients",
@@ -31,42 +33,56 @@ export const T3_CONNECT_ACCOUNT_PAGES = [
 
 export type T3ConnectAccountPageUrl = (typeof T3_CONNECT_ACCOUNT_PAGES)[number]["url"];
 
-type PortalTargets = Readonly<Record<string, HTMLDivElement | undefined>>;
-
-/** Keep portals rendered while the modal can open; Clerk owns the custom-page DOM nodes. */
+/**
+ * Opens the account dialog. `portals` stays in the return value so callers that
+ * rendered Clerk's custom-page portals keep working unchanged.
+ */
 export function useT3ConnectAccountPage(): {
   readonly open: ((page?: T3ConnectAccountPageUrl) => void) | null;
   readonly portals: ReactNode;
 } {
-  const clerk = useClerk();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, signOut, user } = useCloudAuth();
   const m = useMessages();
-  const [targets, setTargets] = useState<PortalTargets>({});
+  const [page, setPage] = useState<T3ConnectAccountPageUrl | null>(null);
+  const current = T3_CONNECT_ACCOUNT_PAGES.find((candidate) => candidate.url === page);
 
-  const open = (page: T3ConnectAccountPageUrl = "t3-connect") => {
-    const setTarget = (key: string, element: HTMLDivElement | undefined) =>
-      setTargets((current) => ({ ...current, [key]: element }));
-    clerk.openUserProfile({
-      __experimental_startPath: `/${page}`,
-      customPages: T3_CONNECT_ACCOUNT_PAGES.map((page) => ({
-        label: m(page.label),
-        url: page.url,
-        mount: (element: HTMLDivElement) => setTarget(`content:${page.url}`, element),
-        unmount: () => setTarget(`content:${page.url}`, undefined),
-        mountIcon: (element: HTMLDivElement) => setTarget(`icon:${page.url}`, element),
-        unmountIcon: () => setTarget(`icon:${page.url}`, undefined),
-      })),
-    });
+  return {
+    open: isSignedIn ? (next: T3ConnectAccountPageUrl = "t3-connect") => setPage(next) : null,
+    portals: (
+      <Dialog
+        open={page !== null}
+        onOpenChange={(open) => {
+          if (!open) setPage(null);
+        }}
+      >
+        <DialogPopup className="max-w-3xl">
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+            <DialogTitle>{user?.name ?? user?.email ?? m(msg("Account"))}</DialogTitle>
+            <Button size="sm" variant="outline" onClick={() => void signOut()}>
+              {m(msg("Sign out"))}
+            </Button>
+          </div>
+          <div className="flex min-h-80">
+            <nav className="flex w-44 shrink-0 flex-col gap-1 border-r p-2">
+              {T3_CONNECT_ACCOUNT_PAGES.map((candidate) => (
+                <button
+                  key={candidate.url}
+                  type="button"
+                  onClick={() => setPage(candidate.url)}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted/60",
+                    candidate.url === page && "bg-muted text-foreground",
+                  )}
+                >
+                  {candidate.icon}
+                  <span>{m(candidate.label)}</span>
+                </button>
+              ))}
+            </nav>
+            <div className="min-w-0 flex-1 p-4">{current?.content}</div>
+          </div>
+        </DialogPopup>
+      </Dialog>
+    ),
   };
-
-  const portals = T3_CONNECT_ACCOUNT_PAGES.flatMap((page) => {
-    const content = targets[`content:${page.url}`];
-    const icon = targets[`icon:${page.url}`];
-    return [
-      content ? createPortal(page.content, content, `content:${page.url}`) : null,
-      icon ? createPortal(page.icon, icon, `icon:${page.url}`) : null,
-    ];
-  });
-
-  return { open: isSignedIn ? open : null, portals };
 }

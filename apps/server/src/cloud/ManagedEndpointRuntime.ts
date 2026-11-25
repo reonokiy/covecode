@@ -1,11 +1,18 @@
-import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
+import {
+  RelayControlPlanePublicConfig,
+  type RelayManagedEndpointOrigin,
+  type RelayManagedEndpointRuntimeConfig,
+} from "@t3tools/contracts/relay";
+import {
+  createEnvironmentLibp2pTunnel,
+  type EnvironmentLibp2pTunnel,
+  type EnvironmentLibp2pTunnelOptions,
+  type EnvironmentTunnelStatusEvent,
+  TunnelRegistrationUnauthorizedError,
+} from "@t3tools/libp2p-tunnel";
 import { RotatingFileSink, RotatingFileSinkError } from "@t3tools/shared/logging";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as RelayClient from "@t3tools/shared/relayClient";
-import * as Clock from "effect/Clock";
-import * as Config from "effect/Config";
+import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Context from "effect/Context";
-import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -15,20 +22,26 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import * as ChildProcess from "effect/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ManagedLimits from "../policy/managedLimits.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
-import * as RelayClientLedger from "./RelayClientLedger.ts";
+import {
+  CLOUD_ENDPOINT_CONFIRMED_ORIGIN,
+  decodeConfirmedOrigin,
+  RELAY_URL_SECRET,
+} from "./config.ts";
+import { relayUrlConfig } from "./publicConfig.ts";
+
+export type CreateEnvironmentLibp2pTunnelFn = (
+  options: EnvironmentLibp2pTunnelOptions,
+) => Promise<EnvironmentLibp2pTunnel>;
 
 export type CloudManagedEndpointRuntimeStatus =
   | {
@@ -44,25 +57,26 @@ export type CloudManagedEndpointRuntimeStatus =
     }
   | {
       readonly status: "running";
-      readonly providerKind: "cloudflare_tunnel";
+      readonly providerKind: "libp2p_tunnel";
       readonly pid: number;
       readonly tunnelId?: string;
       readonly tunnelName?: string;
+      readonly peerId?: string;
     }
   | {
       readonly status: "unsupported";
       readonly providerKind: RelayManagedEndpointRuntimeConfig["providerKind"];
     };
 
-/** What the running cloudflared reports about itself. `null` fields are not known yet. */
+/** Facts reported about the active in-process libp2p tunnel connector. `null` fields are not known yet. */
 export interface ConnectorFacts {
   readonly pid: number;
   readonly readyConnections: number | null;
-  /** The public tunnel hostname from the remote config cloudflared receives once it connects. */
   readonly hostname: string | null;
-  /** The local origin that remote config routes the public hostname to. */
   readonly origin: string | null;
   readonly protocol: string | null;
+  readonly publicHttpBaseUrl?: string | null;
+  readonly peerId?: string | null;
 }
 
 export class CloudManagedEndpointRuntime extends Context.Service<
@@ -70,16 +84,18 @@ export class CloudManagedEndpointRuntime extends Context.Service<
   {
     readonly applyConfig: (
       config: RelayManagedEndpointRuntimeConfig | null,
+      options?: { readonly origin?: RelayManagedEndpointOrigin },
     ) => Effect.Effect<CloudManagedEndpointRuntimeStatus>;
+    readonly setLocalOrigin: (origin: RelayManagedEndpointOrigin) => Effect.Effect<void>;
     /** `null` when no connector is running. */
     readonly inspectConnector: Effect.Effect<ConnectorFacts | null>;
-    /** Emits when a connector registers a connection or its readiness changes. */
+    /** Emits when the connector registers a connection or its readiness changes. */
     readonly readinessChanged: Stream.Stream<void>;
     readonly recoveryRequests: Stream.Stream<RelayManagedEndpointRuntimeConfig>;
     readonly requestRecovery: (config: RelayManagedEndpointRuntimeConfig) => Effect.Effect<void>;
     /**
      * Restarts the connector if it still runs as `pid` and `stillDead` holds once it has
-     * the lock. Returns whether it sent the restart.
+     * the lock. Returns whether it restarted the connector.
      */
     readonly restartConnector: (
       pid: number,
@@ -91,107 +107,22 @@ export class CloudManagedEndpointRuntime extends Context.Service<
 >()("t3/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
 
 interface ActiveConnector {
-  readonly child: ChildProcessSpawner.ChildProcessHandle;
-  readonly executable: RelayClient.AvailableRelayClient;
+  readonly pid: number;
+  readonly tunnel: EnvironmentLibp2pTunnel;
   readonly scope: Scope.Closeable;
   readonly configKey: string;
   readonly config: RelayManagedEndpointRuntimeConfig;
-  readonly startedAtMillis: number;
-  readonly registered: Deferred.Deferred<void>;
-  readonly metricsAddress: Deferred.Deferred<string>;
-  readonly protocol: Ref.Ref<string | null>;
+  readonly originUrl: string;
+  readonly publicHttpBaseUrl: string | null;
+  readonly hostname: string | null;
+  readonly getReadyConnections: () => number | null;
+  readonly getPeerId: () => string | null;
+  readonly markStopped: () => void;
 }
 
-// An instantly failing relay client otherwise respawns ~100 times/sec and exhausts V8 via tracing.
 const isRotatingFileSinkError = Schema.is(RotatingFileSinkError);
-
-const RELAY_RESTART_STABLE_UPTIME_MS = 30_000;
-const RELAY_RESTART_BACKOFF_BASE_MS = 1_000;
-const RELAY_RESTART_BACKOFF_MAX_MS = 60_000;
-// Newly created tunnels can fail authorization briefly while Cloudflare propagates their token.
-const TUNNEL_AUTHORIZATION_FAILURES_BEFORE_RECOVERY = 4;
-// Unknown rejection wording can leave a dead tunnel unconnected; periodically request recovery.
-const CONNECTOR_REGISTRATION_TIMEOUT = Duration.minutes(3);
-// cloudflared resolves edges only at startup and can keep dialing stale addresses after a network change.
-const CONNECTOR_READINESS_INTERVAL = Duration.seconds(30);
-const CONNECTOR_READINESS_REQUEST_TIMEOUT = Duration.seconds(5);
-const CONNECTOR_NOT_READY_CHECKS_BEFORE_RESTART = 6;
-const CONNECTOR_NOT_READY_CHECKS_MAX = 60;
-const RELAY_CLIENT_METRICS_LINE = /\bStarting metrics server on (127\.0\.0\.1:\d+)\/metrics\b/u;
-const RELAY_CLIENT_PROTOCOL = /\bprotocol=(\w+)/u;
-// cloudflared's metrics server: `/ready` answers 200 or 503 with this body, and
-// `/config` holds the ingress rules the edge pushed after the first connection.
-const ConnectorReadyBody = Schema.Struct({ readyConnections: Schema.Number });
-const ConnectorConfigBody = Schema.Struct({
-  config: Schema.Struct({
-    ingress: Schema.optional(
-      Schema.NullOr(
-        Schema.Array(
-          Schema.Struct({
-            hostname: Schema.optional(Schema.String),
-            service: Schema.optional(Schema.String),
-          }),
-        ),
-      ),
-    ),
-  }),
-});
-// Registration resets cloudflared's own fallback, even when QUIC stalls again
-// immediately. Keep that evidence across registrations and connector restarts.
-const QUIC_STALLS_BEFORE_HTTP2 = 30;
-const QUIC_STALL_WINDOW_MS = 5 * 60_000;
-// Retry QUIC on a later startup after transient failures or network changes; reuse never renews this hint.
-const HTTP2_FALLBACK_TTL_MS = 24 * 60 * 60_000;
-const HTTP2_FALLBACK_STATE = "cloud-endpoint-http2-fallback";
-const Http2Fallback = Schema.fromJsonString(Schema.Struct({ fellBackAt: Schema.Number }));
-const decodeHttp2Fallback = Schema.decodeUnknownOption(Http2Fallback);
-const encodeHttp2Fallback = Schema.encodeSync(Http2Fallback);
-// A failed background install of the pinned relay client is retried no sooner
-// than this, so a crash-looping connector or an offline host does not redownload
-// on every reconcile.
-const RELAY_CLIENT_INSTALL_RETRY_INTERVAL_MS = 10 * 60_000;
+const CONTROL_PLANE_DISCOVERY_TIMEOUT = Duration.seconds(10);
 export const RELAY_CLIENT_LOG_FILE = "relay-client.ndjson";
-
-/** Preserve user-chosen PATH binaries and overrides; CLI downloads require consent. */
-function needsPinnedRelayClient(executable: RelayClient.RelayClientStatus): boolean {
-  return (
-    executable.status === "missing" ||
-    (executable.status === "available" &&
-      executable.source === "managed" &&
-      !RelayClient.isPinnedManagedRelayClient(executable))
-  );
-}
-
-export function classifyRelayClientOutput(
-  line: string,
-): "connected" | "unregistered" | "warning" | "debug" {
-  if (/\bRegistered tunnel connection\b/iu.test(line)) {
-    return "connected";
-  }
-  // cloudflared logs a browser closing its request mid-stream as ERR; the tunnel itself is fine.
-  if (
-    /\bERR\s+(?:Request failed\s+)?error="Incoming request ended abruptly: context canceled"(?:\s|$)/u.test(
-      line,
-    )
-  ) {
-    return "debug";
-  }
-  // cloudflared uses zerolog FTL/PNC for fatal/panic; classify them above debug too.
-  if (/\b(?:ERR|WRN|FTL|PNC)\b/u.test(line)) {
-    return "warning";
-  }
-  return /\bINF\b.*\bUnregistered tunnel connection\b/u.test(line) ? "unregistered" : "debug";
-}
-
-/** Edge rejection wording varies; any Unauthorized registration error counts. */
-export function isRejectedRelayClientTunnelOutput(line: string): boolean {
-  return (
-    /\bRegister tunnel error from server side\b/iu.test(line) &&
-    /error="(?:Unauthorized:[^"]*|Failed to get tunnel|Tunnel not found|Record for tunnel not found|Invalid tunnel secret)"/iu.test(
-      line,
-    )
-  );
-}
 
 export function isRetryableManagedEndpointRuntimeStatus(status: unknown): boolean {
   if (typeof status !== "object" || status === null || !("status" in status)) {
@@ -203,21 +134,81 @@ export function isRetryableManagedEndpointRuntimeStatus(status: unknown): boolea
   return status.failure === "not-installed" || status.failure === "spawn-failed";
 }
 
-function runtimeConfigKey(config: RelayManagedEndpointRuntimeConfig): string {
+function formatOriginUrl(origin: RelayManagedEndpointOrigin): string {
+  const host =
+    origin.localHttpHost.includes(":") && !origin.localHttpHost.startsWith("[")
+      ? `[${origin.localHttpHost}]`
+      : origin.localHttpHost;
+  return `http://${host}:${origin.localHttpPort}`;
+}
+
+function runtimeConfigKey(
+  config: RelayManagedEndpointRuntimeConfig,
+  origin: RelayManagedEndpointOrigin,
+): string {
   return JSON.stringify({
     providerKind: config.providerKind,
     connectorToken: config.connectorToken,
     tunnelId: config.tunnelId ?? null,
     tunnelName: config.tunnelName ?? null,
+    endpointKey: config.endpointKey ?? null,
+    publicHttpBaseUrl: config.publicHttpBaseUrl ?? null,
+    relayMultiaddrs: config.relayMultiaddrs ?? [],
+    transportMode: config.transportMode ?? null,
+    origin: {
+      localHttpHost: origin.localHttpHost,
+      localHttpPort: origin.localHttpPort,
+    },
   });
 }
 
+function deriveEndpointKey(config: RelayManagedEndpointRuntimeConfig): string {
+  if (config.endpointKey !== undefined && config.endpointKey.length > 0) {
+    return config.endpointKey;
+  }
+  const fromTunnelName = config.tunnelName?.split("-").at(-1);
+  if (fromTunnelName !== undefined && fromTunnelName.length > 0) {
+    return fromTunnelName;
+  }
+  if (config.tunnelId !== undefined && config.tunnelId.length > 0) {
+    return config.tunnelId;
+  }
+  return "default";
+}
+
+function extractUrlHost(urlString: string | null): string | null {
+  if (urlString === null) return null;
+  try {
+    return new URL(urlString).host;
+  } catch {
+    return null;
+  }
+}
+
+function isRegistrationRejectedEvent(event: EnvironmentTunnelStatusEvent): boolean {
+  return (
+    event.state === "stopped" &&
+    event.error !== undefined &&
+    /rejected tunnel registration/iu.test(event.error)
+  );
+}
+
+class TunnelStartFailure extends Schema.TaggedError<TunnelStartFailure>()("TunnelStartFailure", {
+  unauthorized: Schema.Boolean,
+  reason: Schema.String,
+}) {}
+
 const stopConnector = (connector: ActiveConnector | null) =>
   connector
-    ? Scope.close(connector.scope, Exit.void).pipe(
+    ? Effect.sync(() => {
+        connector.markStopped();
+      }).pipe(
+        Effect.andThen(Effect.promise(() => connector.tunnel.stop()).pipe(Effect.ignore)),
+        Effect.andThen(Scope.close(connector.scope, Exit.void).pipe(Effect.ignore)),
         Effect.tap(() =>
-          Effect.logInfo("Relay client stopped", {
-            pid: Number(connector.child.pid),
+          Effect.logInfo("libp2p tunnel connector stopped", {
+            pid: connector.pid,
+            peerId: connector.getPeerId() ?? connector.tunnel.peerId,
           }),
         ),
         Effect.ignore,
@@ -225,68 +216,28 @@ const stopConnector = (connector: ActiveConnector | null) =>
     : Effect.void;
 
 /** @public */
-export const make = Effect.gen(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const relayClient = yield* RelayClient.RelayClient;
-  const relayClientLedger = yield* RelayClientLedger.RelayClientLedger;
+export const make = Effect.fn("CloudManagedEndpointRuntime.make")(function* (factoryOptions?: {
+  readonly createTunnel?: CreateEnvironmentLibp2pTunnelFn;
+}) {
+  const createTunnel = factoryOptions?.createTunnel ?? createEnvironmentLibp2pTunnel;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
-  const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
-  // Without T3 Connect no connector ever runs, whoever asks for one.
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const path = yield* Path.Path;
+  const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
   const connectAllowed = ManagedLimits.allowsConnect(yield* ManagedPolicy.ManagedPolicy);
+
   const activeRef = yield* Ref.make<ActiveConnector | null>(null);
   const desiredConfigRef = yield* Ref.make<RelayManagedEndpointRuntimeConfig | null>(null);
+  const localOriginRef = yield* Ref.make<RelayManagedEndpointOrigin | null>(null);
+  const instanceCounterRef = yield* Ref.make(0);
+
   const recoveryRequests = yield* Queue.sliding<RelayManagedEndpointRuntimeConfig>(1);
   const tunnelConnections = yield* Queue.sliding<void>(1);
   const readinessChanges = yield* Queue.sliding<void>(1);
   const reconcileSemaphore = yield* Semaphore.make(1);
-  const restartDelayRef = yield* Ref.make(0);
   const linkStateSemaphore = yield* Semaphore.make(1);
-  const runtimeScope = yield* Effect.scope;
-  const installInFlightRef = yield* Ref.make(false);
-  const lastInstallFailureAtRef = yield* Ref.make<number | null>(null);
-  const prunedRef = yield* Ref.make(false);
-  const retryLoopRunningRef = yield* Ref.make(false);
-  const notReadyChecksBeforeRestartRef = yield* Ref.make(CONNECTOR_NOT_READY_CHECKS_BEFORE_RESTART);
-  // The relay client shares the server's process group, so it exits on these signals before the finalizer runs.
-  let shutdownSignalReceived = false;
-  const onShutdownSignal = () => {
-    shutdownSignalReceived = true;
-  };
-  yield* Effect.acquireRelease(
-    Effect.sync(() => {
-      process.on("SIGINT", onShutdownSignal);
-      process.on("SIGTERM", onShutdownSignal);
-    }),
-    () =>
-      Effect.sync(() => {
-        process.off("SIGINT", onShutdownSignal);
-        process.off("SIGTERM", onShutdownSignal);
-      }),
-  );
-  // An explicit cloudflared transport in the environment is the user's choice.
-  const env = yield* HostProcess.Environment;
-  const transportChosenByUser = Option.isSome(
-    yield* Config.String("TUNNEL_TRANSPORT_PROTOCOL").pipe(Config.option),
-  );
-  const previousFallback = transportChosenByUser
-    ? Option.none()
-    : yield* secrets.get(HTTP2_FALLBACK_STATE).pipe(
-        Effect.map(Option.flatMap((bytes) => decodeHttp2Fallback(new TextDecoder().decode(bytes)))),
-        Effect.orElseSucceed(() => Option.none()),
-      );
-  const now = yield* Clock.currentTimeMillis;
-  const http2Ref = yield* Ref.make(
-    Option.isSome(previousFallback) &&
-      now >= previousFallback.value.fellBackAt &&
-      now - previousFallback.value.fellBackAt < HTTP2_FALLBACK_TTL_MS,
-  );
-  const quicStallsRef = yield* Ref.make<ReadonlyArray<number>>([]);
-  let reconcileConfig: CloudManagedEndpointRuntime["Service"]["applyConfig"];
 
-  const { logsDir } = yield* ServerConfig.ServerConfig;
-  const path = yield* Path.Path;
-  const relayClientLogPath = path.join(logsDir, RELAY_CLIENT_LOG_FILE);
-  // Synchronous appends avoid a flush timer for this low-volume log.
+  const relayClientLogPath = path.join(serverConfig.logsDir, RELAY_CLIENT_LOG_FILE);
   const fallbackLoggers = yield* Effect.service(Logger.CurrentLoggers);
   let writeFailureReported = false;
   const relayClientLog = yield* Effect.try({
@@ -341,7 +292,6 @@ export const make = Effect.gen(function* () {
       }).pipe(Effect.as(undefined)),
     ),
   );
-  // Forked connector fibers inherit this logger after the applyConfig span ends.
   const withRelayClientLog = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     relayClientLog ? Effect.withLogger(effect, relayClientLog) : effect;
 
@@ -350,625 +300,314 @@ export const make = Effect.gen(function* () {
     yield* stopConnector(active);
   });
 
-  // Lives until connector exit and starts replacements; avoid nested lifetime spans.
-  const superviseConnector = Effect.fnUntraced(
-    function* (connector: ActiveConnector) {
-      const result = yield* Effect.result(connector.child.exitCode);
-      const activeAtExit = yield* Ref.get(activeRef);
-      if (
-        activeAtExit?.child.pid !== connector.child.pid ||
-        activeAtExit.configKey !== connector.configKey
-      ) {
-        return;
+  const resolveEffectiveOrigin = Effect.fn("CloudManagedEndpointRuntime.resolveEffectiveOrigin")(
+    function* (explicitOrigin?: RelayManagedEndpointOrigin) {
+      if (explicitOrigin !== undefined) {
+        yield* Ref.set(localOriginRef, explicitOrigin);
+        return explicitOrigin;
       }
-      const uptimeMillis = (yield* Clock.currentTimeMillis) - connector.startedAtMillis;
-      // Back off outside the semaphore so config changes remain responsive; recheck config afterwards.
-      const restartDelayMillis = yield* Ref.modify(restartDelayRef, (current) => {
-        if (uptimeMillis >= RELAY_RESTART_STABLE_UPTIME_MS) {
-          return [0, 0];
+      const storedOrigin = yield* Ref.get(localOriginRef);
+      if (storedOrigin !== null) {
+        return storedOrigin;
+      }
+      const confirmedBytes = yield* secrets
+        .get(CLOUD_ENDPOINT_CONFIRMED_ORIGIN)
+        .pipe(Effect.orElseSucceed(Option.none));
+      if (Option.isSome(confirmedBytes)) {
+        const decoded = decodeConfirmedOrigin(new TextDecoder().decode(confirmedBytes.value));
+        if (Option.isSome(decoded)) {
+          return decoded.value.origin;
         }
-        return [
-          current,
-          current === 0
-            ? RELAY_RESTART_BACKOFF_BASE_MS
-            : Math.min(current * 2, RELAY_RESTART_BACKOFF_MAX_MS),
-        ];
-      });
-      if (restartDelayMillis > 0) {
-        yield* Effect.logWarning("Relay client is crash-looping; delaying restart", {
-          pid: Number(connector.child.pid),
-          uptimeMillis,
-          restartDelayMillis,
-          tunnelId: connector.config.tunnelId,
-          tunnelName: connector.config.tunnelName,
-        });
-        yield* Effect.sleep(Duration.millis(restartDelayMillis));
       }
-      yield* reconcileSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const active = yield* Ref.get(activeRef);
-          if (
-            active?.child.pid !== connector.child.pid ||
-            active.configKey !== connector.configKey
-          ) {
-            return;
-          }
-          yield* Ref.set(activeRef, null);
-          yield* stopConnector(connector);
-
-          const desiredConfig = yield* Ref.get(desiredConfigRef);
-          if (
-            shutdownSignalReceived ||
-            !desiredConfig ||
-            desiredConfig.providerKind !== "cloudflare_tunnel" ||
-            runtimeConfigKey(desiredConfig) !== connector.configKey
-          ) {
-            return;
-          }
-
-          yield* Effect.logWarning("Relay client exited; restarting", {
-            pid: Number(connector.child.pid),
-            ...(Result.isSuccess(result)
-              ? { exitCode: Number(result.success) }
-              : { cause: result.failure }),
-            tunnelId: connector.config.tunnelId,
-            tunnelName: connector.config.tunnelName,
-          });
-          yield* Queue.offer(recoveryRequests, connector.config);
-          yield* reconcileConfig(desiredConfig);
-        }),
-      );
+      return {
+        localHttpHost: "127.0.0.1",
+        localHttpPort: serverConfig.port > 0 ? serverConfig.port : 3773,
+      } satisfies RelayManagedEndpointOrigin;
     },
-    Effect.catchCause((cause) => Effect.logWarning("Relay client supervisor failed", { cause })),
   );
 
-  // Keep the old connector until its replacement registers, preserving the relay connection.
-  const installPinnedRelayClient = Effect.gen(function* () {
-    if (yield* Ref.getAndSet(installInFlightRef, true)) return;
-    yield* Effect.logInfo("Installing the pinned relay client", {
-      version: RelayClient.CLOUDFLARED_VERSION,
-    });
-    yield* relayClient.install.pipe(
-      Effect.tap(() => Ref.set(lastInstallFailureAtRef, null)),
-      Effect.flatMap((installed) =>
-        reconcileSemaphore.withPermits(1)(
-          Effect.gen(function* () {
-            const desiredConfig = yield* Ref.get(desiredConfigRef);
-            if (!desiredConfig || desiredConfig.providerKind !== "cloudflare_tunnel") return;
-            const active = yield* Ref.get(activeRef);
-            // Self-updated binaries share the pinned path; compare versions to detect replacements.
-            if (
-              active?.executable.executablePath === installed.executablePath &&
-              active.executable.version === installed.version
-            ) {
-              return;
-            }
-            // A scanner can block a fresh binary's probe; retry instead of restarting onto the older binary.
-            const resolved = yield* relayClient.resolve;
-            if (
-              resolved.status !== "available" ||
-              resolved.executablePath !== installed.executablePath ||
-              resolved.version !== installed.version
-            ) {
-              return;
-            }
-            yield* Effect.logInfo("Relay client installed; moving the connector to it", {
-              version: installed.version,
-              previousVersion: active?.executable.version,
-            });
-            const previous = yield* Ref.getAndSet(activeRef, null);
-            const status = yield* reconcileConfig(desiredConfig);
-            const next = yield* Ref.get(activeRef);
-            if (!next) {
-              yield* Effect.logWarning("Relay client did not start after the update", status);
-              // The supervisor skips exits while detached; request recovery explicitly.
-              const previousRunning = previous
-                ? yield* previous.child.isRunning.pipe(Effect.orElseSucceed(() => false))
-                : false;
-              if (previous && previousRunning) {
-                yield* Ref.set(activeRef, previous);
-              } else {
-                yield* stopConnector(previous);
-                yield* Queue.offer(recoveryRequests, desiredConfig);
-              }
-              return;
-            }
-            if (previous) {
-              yield* Deferred.await(next.registered).pipe(
-                Effect.ensuring(stopConnector(previous)),
-                Effect.forkIn(next.scope),
-              );
-            }
-          }),
-        ),
-      ),
-      Effect.catchTags({
-        RelayClientInstallError: (error) =>
-          Clock.currentTimeMillis.pipe(
-            Effect.flatMap((failedAt) => Ref.set(lastInstallFailureAtRef, failedAt)),
-            Effect.andThen(
-              Effect.logWarning("Could not install the pinned relay client", {
-                reason: error.reason,
-                message: error.message,
-                cause: error.cause,
-              }),
-            ),
-          ),
-      }),
-      Effect.ensuring(Ref.set(installInFlightRef, false)),
-    );
+  const resolveRelayUrl = Effect.gen(function* () {
+    const secretUrl = yield* secrets.get(RELAY_URL_SECRET).pipe(Effect.orElseSucceed(Option.none));
+    if (Option.isSome(secretUrl)) {
+      const normalized = normalizeSecureRelayUrl(new TextDecoder().decode(secretUrl.value));
+      if (normalized !== null) return normalized;
+    }
+    return Option.getOrNull(yield* relayUrlConfig.pipe(Effect.option));
   });
 
-  const ensurePinnedRelayClient = Effect.gen(function* () {
-    const now = yield* Clock.currentTimeMillis;
-    const lastFailureAt = yield* Ref.get(lastInstallFailureAtRef);
-    if (lastFailureAt !== null && now - lastFailureAt < RELAY_CLIENT_INSTALL_RETRY_INTERVAL_MS) {
-      return;
-    }
-    yield* installPinnedRelayClient;
-  }).pipe(Effect.forkIn(runtimeScope), Effect.asVoid);
-
-  // Retry installs skipped by applyConfig without the failure gate.
-  const retryPinnedRelayClientInstall = Effect.gen(function* () {
-    while (true) {
-      yield* Effect.sleep(Duration.millis(RELAY_CLIENT_INSTALL_RETRY_INTERVAL_MS));
-      const desiredConfig = yield* Ref.get(desiredConfigRef);
-      if (!desiredConfig || desiredConfig.providerKind !== "cloudflare_tunnel") return;
-      // An installed pin still needs activation after a failed probe or while an older connector runs.
-      const active = yield* Ref.get(activeRef);
-      if (active && !needsPinnedRelayClient(active.executable)) return;
-      yield* installPinnedRelayClient;
-    }
-  }).pipe(Effect.ensuring(Ref.set(retryLoopRunningRef, false)));
-
-  const startPinnedRelayClientRetries = Effect.gen(function* () {
-    if (yield* Ref.getAndSet(retryLoopRunningRef, true)) return;
-    yield* Effect.forkIn(retryPinnedRelayClientInstall, runtimeScope);
-  });
-
-  // Registration retries can last for the connector lifetime; keep this loop untraced.
-  const watchConnectorRegistration = Effect.fnUntraced(
-    function* (connector: ActiveConnector) {
-      yield* Effect.sleep(CONNECTOR_REGISTRATION_TIMEOUT);
-      if (yield* Deferred.isDone(connector.registered)) return true;
-      yield* Effect.logWarning(
-        "Relay client has not registered a tunnel connection; requesting recovery",
-        {
-          pid: Number(connector.child.pid),
-          tunnelId: connector.config.tunnelId,
-          tunnelName: connector.config.tunnelName,
-        },
-      );
-      yield* Queue.offer(recoveryRequests, connector.config);
-      return false;
+  const fetchControlPlaneConfig = Effect.fn("CloudManagedEndpointRuntime.fetchControlPlaneConfig")(
+    function* (relayUrl: string) {
+      return yield* httpClient
+        .get(`${relayUrl}/.well-known/cove-control-plane`)
+        .pipe(
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayControlPlanePublicConfig)),
+          Effect.scoped,
+          Effect.withTracerEnabled(false),
+          Effect.timeout(CONTROL_PLANE_DISCOVERY_TIMEOUT),
+        );
     },
-    Effect.repeat({ until: (connected) => connected }),
   );
 
-  // Only an explicit 503 counts: a failed request says nothing about the
-  // Readiness polling runs for the connector lifetime; keep this loop untraced.
-  const watchConnectorReadiness = Effect.fnUntraced(function* (connector: ActiveConnector) {
-    const readyUrl = `http://${yield* Deferred.await(connector.metricsAddress)}/ready`;
-    let notReadyChecks = 0;
-    let lastReady: boolean | null = null;
-    while (true) {
-      yield* Effect.sleep(CONNECTOR_READINESS_INTERVAL);
-      const status = yield* httpClient.get(readyUrl).pipe(
-        Effect.map((response) => response.status),
-        Effect.scoped,
-        Effect.withTracerEnabled(false),
-        Effect.timeoutOption(CONNECTOR_READINESS_REQUEST_TIMEOUT),
-        Effect.orElseSucceed(() => Option.none<number>()),
-      );
-      if (Option.isNone(status)) continue;
-      if (status.value === 200 || status.value === 503) {
-        const ready = status.value === 200;
-        if (ready !== lastReady) yield* Queue.offer(readinessChanges, undefined);
-        lastReady = ready;
-      }
-      if (status.value === 200) {
-        notReadyChecks = 0;
-        yield* Ref.set(notReadyChecksBeforeRestartRef, CONNECTOR_NOT_READY_CHECKS_BEFORE_RESTART);
-        continue;
-      }
-      if (status.value !== 503) continue;
-      notReadyChecks += 1;
-      const threshold = yield* Ref.get(notReadyChecksBeforeRestartRef);
-      if (notReadyChecks < threshold) continue;
-      notReadyChecks = 0;
-      yield* Ref.set(
-        notReadyChecksBeforeRestartRef,
-        Math.min(threshold * 2, CONNECTOR_NOT_READY_CHECKS_MAX),
-      );
-      yield* Effect.logWarning("Relay client has no tunnel connection; restarting it", {
-        pid: Number(connector.child.pid),
-        notReadyChecks: threshold,
-        tunnelId: connector.config.tunnelId,
-        tunnelName: connector.config.tunnelName,
-      });
-      yield* connector.child.kill().pipe(Effect.ignore);
-    }
-  });
-
-  const rememberHttp2Fallback = Effect.fnUntraced(function* () {
-    yield* Ref.set(http2Ref, true);
-    yield* secrets
-      .set(
-        HTTP2_FALLBACK_STATE,
-        new TextEncoder().encode(
-          encodeHttp2Fallback({ fellBackAt: yield* Clock.currentTimeMillis }),
-        ),
-      )
-      .pipe(
-        Effect.catch(() => Effect.logWarning("Could not persist the relay client HTTP/2 fallback")),
-      );
-  });
-
-  const switchToHttp2 = Effect.fnUntraced(function* (connector: ActiveConnector) {
-    const active = yield* Ref.get(activeRef);
-    const desiredConfig = yield* Ref.get(desiredConfigRef);
-    if ((yield* Ref.get(http2Ref)) || active !== connector || !desiredConfig) return;
-    yield* rememberHttp2Fallback();
-    yield* Effect.logWarning("Relay client keeps losing QUIC connections; switching to HTTP/2", {
-      pid: Number(connector.child.pid),
-      tunnelId: connector.config.tunnelId,
-      tunnelName: connector.config.tunnelName,
-    });
-    // Shutdown must not interrupt cleanup after active ownership is cleared.
-    yield* Effect.uninterruptible(stopActive);
-    const status = yield* reconcileConfig(desiredConfig);
-    // A failed spawn has no supervisor to request recovery.
-    if (status.status !== "running") {
-      yield* Queue.offer(recoveryRequests, desiredConfig);
-    }
-  }, reconcileSemaphore.withPermits(1));
-
-  const noteQuicStall = Effect.fnUntraced(function* (connector: ActiveConnector) {
-    if (transportChosenByUser || (yield* Ref.get(http2Ref))) return;
-    const now = yield* Clock.currentTimeMillis;
-    if ((yield* Ref.get(activeRef)) !== connector) return;
-    const stalls = yield* Ref.updateAndGet(quicStallsRef, (previous) => [
-      ...previous.filter((at) => now - at < QUIC_STALL_WINDOW_MS),
-      now,
-    ]);
-    if (stalls.length < QUIC_STALLS_BEFORE_HTTP2) return;
-    // Stopping the connector interrupts the output observer that called this.
-    yield* Effect.forkIn(switchToHttp2(connector), runtimeScope);
-  });
-
-  const observeConnectorOutput = (connector: ActiveConnector) => {
-    let rejectedRegistrations = 0;
-
-    return connector.child.all.pipe(
-      Stream.decodeText(),
-      Stream.splitLines,
-      Stream.map((line) => line.trim()),
-      Stream.filter((line) => line.length > 0),
-      Stream.runForEach((line) => {
-        const output = line.replaceAll(connector.config.connectorToken, "<redacted>");
-        const attributes = {
-          pid: Number(connector.child.pid),
-          tunnelId: connector.config.tunnelId,
-          tunnelName: connector.config.tunnelName,
-          output,
-        };
-        switch (classifyRelayClientOutput(line)) {
-          case "connected": {
-            rejectedRegistrations = 0;
-            const protocol = RELAY_CLIENT_PROTOCOL.exec(line)?.[1] ?? null;
-            return Deferred.succeed(connector.registered, undefined).pipe(
-              Effect.andThen(Ref.set(connector.protocol, protocol)),
-              // cloudflared started with `auto` fell back on its own; later starts skip QUIC too.
-              Effect.andThen(
-                protocol === "http2" && !transportChosenByUser
-                  ? Ref.get(http2Ref).pipe(
-                      Effect.flatMap((http2) => (http2 ? Effect.void : rememberHttp2Fallback())),
-                    )
-                  : Effect.void,
-              ),
-              Effect.andThen(
-                Effect.logInfo("Relay client tunnel connection registered", attributes),
-              ),
-              Effect.andThen(Queue.offer(tunnelConnections, undefined)),
-              Effect.andThen(Queue.offer(readinessChanges, undefined)),
-              Effect.andThen(
-                RelayClient.isPinnedManagedRelayClient(connector.executable)
-                  ? Ref.getAndSet(prunedRef, true).pipe(
-                      Effect.flatMap((pruned) =>
-                        pruned ? Effect.void : relayClient.pruneManagedVersions,
-                      ),
-                    )
-                  : Effect.void,
-              ),
-              Effect.asVoid,
-            );
-          }
-          case "unregistered":
-            return Effect.logInfo("Relay client tunnel connection unregistered", attributes);
-          case "warning":
-            if (/\btimeout: no recent network activity\b/u.test(line)) {
-              return noteQuicStall(connector).pipe(
-                Effect.andThen(
-                  Effect.logWarning("Relay client reported a transport warning", attributes),
-                ),
-              );
-            }
-            if (isRejectedRelayClientTunnelOutput(line)) {
-              rejectedRegistrations += 1;
-              if (rejectedRegistrations >= TUNNEL_AUTHORIZATION_FAILURES_BEFORE_RECOVERY) {
-                rejectedRegistrations = 0;
-                return Effect.logWarning(
-                  "Relay client tunnel was rejected; requesting recovery",
-                  attributes,
-                ).pipe(
-                  Effect.andThen(Queue.offer(recoveryRequests, connector.config)),
-                  Effect.asVoid,
-                );
-              }
-            }
-            return Effect.logWarning("Relay client reported a transport warning", attributes);
-          case "debug": {
-            const metricsAddress = RELAY_CLIENT_METRICS_LINE.exec(line)?.[1];
-            return metricsAddress
-              ? Deferred.succeed(connector.metricsAddress, metricsAddress).pipe(
-                  Effect.andThen(Effect.logDebug("Relay client output", attributes)),
-                )
-              : Effect.logDebug("Relay client output", attributes);
-          }
-        }
-      }),
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Relay client output observer failed", {
-          cause,
-          pid: Number(connector.child.pid),
-          tunnelId: connector.config.tunnelId,
-          tunnelName: connector.config.tunnelName,
-        }),
-      ),
-    );
-  };
-
-  reconcileConfig = Effect.fn("CloudManagedEndpointRuntime.reconcileConfig")(function* (config) {
-    if (!config || config.providerKind !== "cloudflare_tunnel") {
+  const reconcileConfig = Effect.fn("CloudManagedEndpointRuntime.reconcileConfig")(function* (
+    config: RelayManagedEndpointRuntimeConfig | null,
+    options?: { readonly origin?: RelayManagedEndpointOrigin },
+  ) {
+    if (!connectAllowed || !config || config.providerKind !== "libp2p_tunnel") {
       yield* stopActive;
-      return config
-        ? { status: "unsupported", providerKind: config.providerKind }
-        : { status: "disabled" };
+      return !connectAllowed || !config
+        ? ({ status: "disabled" } satisfies CloudManagedEndpointRuntimeStatus)
+        : ({
+            status: "unsupported",
+            providerKind: config.providerKind,
+          } satisfies CloudManagedEndpointRuntimeStatus);
     }
 
-    const nextConfigKey = runtimeConfigKey(config);
+    const origin = yield* resolveEffectiveOrigin(options?.origin);
+    const nextConfigKey = runtimeConfigKey(config, origin);
     const active = yield* Ref.get(activeRef);
     if (active?.configKey === nextConfigKey) {
-      const isRunning = yield* active.child.isRunning.pipe(Effect.orElseSucceed(() => false));
-      if (isRunning) {
-        return {
-          status: "running",
-          providerKind: "cloudflare_tunnel",
-          pid: Number(active.child.pid),
-          ...(active.config.tunnelId ? { tunnelId: active.config.tunnelId } : {}),
-          ...(active.config.tunnelName ? { tunnelName: active.config.tunnelName } : {}),
-        } satisfies CloudManagedEndpointRuntimeStatus;
-      }
+      return {
+        status: "running",
+        providerKind: "libp2p_tunnel",
+        pid: active.pid,
+        ...(active.config.tunnelId ? { tunnelId: active.config.tunnelId } : {}),
+        ...(active.config.tunnelName ? { tunnelName: active.config.tunnelName } : {}),
+        ...(active.getPeerId() !== null
+          ? { peerId: active.getPeerId() ?? active.tunnel.peerId }
+          : { peerId: active.tunnel.peerId }),
+      } satisfies CloudManagedEndpointRuntimeStatus;
     }
 
     yield* stopActive;
 
-    const executable = yield* relayClient.resolve;
-    if (needsPinnedRelayClient(executable)) {
-      yield* ensurePinnedRelayClient;
-      yield* startPinnedRelayClientRetries;
+    const relayUrl = yield* resolveRelayUrl;
+    let relayMultiaddrs: readonly string[] = config.relayMultiaddrs ?? [];
+    if (relayMultiaddrs.length === 0 && relayUrl !== null) {
+      const discovered = yield* fetchControlPlaneConfig(relayUrl).pipe(Effect.option);
+      if (Option.isSome(discovered) && discovered.value.libp2p.enabled) {
+        relayMultiaddrs = discovered.value.libp2p.relayMultiaddrs;
+      }
     }
-    if (executable.status !== "available") {
+    if (relayMultiaddrs.length === 0) {
+      const reason = "Control plane did not advertise any libp2p relay multiaddrs.";
+      yield* Effect.logWarning(reason, {
+        tunnelId: config.tunnelId,
+        tunnelName: config.tunnelName,
+      });
       return {
         status: "failed",
-        providerKind: "cloudflare_tunnel",
-        failure: executable.status === "unsupported" ? "unsupported-platform" : "not-installed",
-        reason:
-          executable.status === "unsupported"
-            ? `Relay client is unsupported on ${executable.platform}-${executable.arch}.`
-            : "The relay client is not installed.",
+        providerKind: "libp2p_tunnel",
+        failure: "spawn-failed",
+        reason,
         ...(config.tunnelId ? { tunnelId: config.tunnelId } : {}),
         ...(config.tunnelName ? { tunnelName: config.tunnelName } : {}),
       } satisfies CloudManagedEndpointRuntimeStatus;
     }
 
-    const http2 = yield* Ref.get(http2Ref);
-    const connectorScope = yield* Scope.make("sequential");
-    // Added before the spawn so it runs after the spawner's finalizer has stopped the client.
-    let forgetRelayClient: Effect.Effect<void> = Effect.void;
-    yield* Scope.addFinalizer(
-      connectorScope,
-      Effect.suspend(() => forgetRelayClient),
-    );
-    const child = yield* spawner
-      .spawn(
-        ChildProcess.make(
-          executable.executablePath,
-          [
-            "tunnel",
-            "--no-autoupdate",
-            "--loglevel",
-            "info",
-            "--output",
-            "default",
-            "--metrics",
-            "127.0.0.1:0",
-            ...(http2 ? ["--protocol", "http2"] : []),
-            "run",
-          ],
-          {
-            detached: false,
-            env: {
-              ...env,
-              TUNNEL_TOKEN: config.connectorToken,
-            },
-            shell: false,
-            stderr: "pipe",
-            stdout: "pipe",
-          },
-        ),
-      )
-      .pipe(
-        Effect.provideService(Scope.Scope, connectorScope),
-        Effect.tap((child) =>
-          Effect.logInfo("Relay client process started; waiting for tunnel connection", {
-            pid: Number(child.pid),
-            source: executable.source,
-            version: executable.version,
-            protocol: http2 ? "http2" : "auto",
-            tunnelId: config.tunnelId,
-            tunnelName: config.tunnelName,
-          }),
-        ),
-        Effect.catch((cause) =>
-          Effect.logWarning("Failed to start relay client", {
-            cause,
-            tunnelId: config.tunnelId,
-            tunnelName: config.tunnelName,
-          }).pipe(
-            Effect.andThen(Scope.close(connectorScope, Exit.void).pipe(Effect.ignore)),
-            Effect.as({
-              status: "failed",
-              providerKind: "cloudflare_tunnel",
-              failure: "spawn-failed",
-              reason: String(cause),
-              ...(config.tunnelId ? { tunnelId: config.tunnelId } : {}),
-              ...(config.tunnelName ? { tunnelName: config.tunnelName } : {}),
-            } satisfies CloudManagedEndpointRuntimeStatus),
-          ),
-        ),
-      );
+    const endpointKey = deriveEndpointKey(config);
+    const endpointId = config.tunnelId ?? endpointKey;
+    const publicHttpBaseUrl =
+      config.publicHttpBaseUrl ??
+      (relayUrl !== null ? `${relayUrl.replace(/\/+$/u, "")}/t/${endpointKey}/` : null);
+    const hostname = extractUrlHost(publicHttpBaseUrl);
+    const originUrl = formatOriginUrl(origin);
+    const keyPath = path.join(serverConfig.stateDir, "libp2p-environment.key");
 
-    if ("status" in child && child.status === "failed") {
-      return child;
-    }
+    let stopped = false;
+    let attached = false;
+    let readyConnections: number | null = 0;
+    let peerId: string | null = null;
+    let pendingReadinessSignal = false;
+    let pendingConnectedSignal = false;
+    const statusLogQueue = yield* Queue.unbounded<EnvironmentTunnelStatusEvent>();
 
-    if (!("status" in child)) {
-      // An interrupt before activeRef owns a supervised connector would leave its client open or unwatched.
-      yield* Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          forgetRelayClient = yield* relayClientLedger.track(Number(child.pid));
-          const connector = {
-            child,
-            executable,
-            scope: connectorScope,
-            configKey: nextConfigKey,
-            config,
-            startedAtMillis: yield* Clock.currentTimeMillis,
-            registered: yield* Deferred.make<void>(),
-            metricsAddress: yield* Deferred.make<string>(),
-            protocol: yield* Ref.make<string | null>(null),
-          } satisfies ActiveConnector;
-          yield* Ref.set(activeRef, connector);
-          yield* Effect.forkIn(restore(observeConnectorOutput(connector)), connectorScope);
-          yield* Effect.forkIn(restore(superviseConnector(connector)), connectorScope);
-          yield* Effect.forkIn(restore(watchConnectorRegistration(connector)), connectorScope);
-          yield* Effect.forkIn(restore(watchConnectorReadiness(connector)), connectorScope);
+    const onStatusChange = (event: EnvironmentTunnelStatusEvent) => {
+      if (stopped) return;
+      readyConnections = event.state === "connected" ? 1 : 0;
+      peerId = event.peerId;
+      Queue.offerUnsafe(statusLogQueue, event);
+      if (!attached) {
+        pendingReadinessSignal = true;
+        if (event.state === "connected") {
+          pendingConnectedSignal = true;
+        }
+        return;
+      }
+      Queue.offerUnsafe(readinessChanges, undefined);
+      if (event.state === "connected") {
+        Queue.offerUnsafe(tunnelConnections, undefined);
+      } else if (isRegistrationRejectedEvent(event)) {
+        Queue.offerUnsafe(recoveryRequests, config);
+      }
+    };
+
+    const startOutcome = yield* Effect.tryPromise({
+      try: () =>
+        createTunnel({
+          relayMultiaddrs,
+          endpointId,
+          endpointKey,
+          connectorToken: config.connectorToken,
+          localHost: origin.localHttpHost,
+          localPort: origin.localHttpPort,
+          enableP2p: config.transportMode !== "relay",
+          keyPath,
+          onStatusChange,
         }),
-      );
+      catch: (cause) =>
+        new TunnelStartFailure({
+          unauthorized: cause instanceof TunnelRegistrationUnauthorizedError,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        }),
+    }).pipe(Effect.result);
+
+    if (startOutcome._tag === "Failure") {
+      stopped = true;
+      const { unauthorized, reason } = startOutcome.failure;
+      yield* Effect.logWarning("Failed to start libp2p tunnel connector", {
+        reason,
+        tunnelId: config.tunnelId,
+        tunnelName: config.tunnelName,
+      });
+      if (unauthorized) {
+        yield* Queue.offer(recoveryRequests, config);
+      }
       return {
-        status: "running",
-        providerKind: "cloudflare_tunnel",
-        pid: Number(child.pid),
+        status: "failed",
+        providerKind: "libp2p_tunnel",
+        failure: "spawn-failed",
+        reason,
         ...(config.tunnelId ? { tunnelId: config.tunnelId } : {}),
         ...(config.tunnelName ? { tunnelName: config.tunnelName } : {}),
       } satisfies CloudManagedEndpointRuntimeStatus;
     }
+
+    const tunnel = startOutcome.success;
+    const connectorScope = yield* Scope.make("sequential");
+    const pid = yield* Ref.updateAndGet(instanceCounterRef, (n) => n + 1);
+
+    yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const connector: ActiveConnector = {
+          pid,
+          tunnel,
+          scope: connectorScope,
+          configKey: nextConfigKey,
+          config,
+          originUrl,
+          publicHttpBaseUrl,
+          hostname,
+          getReadyConnections: () => readyConnections,
+          getPeerId: () => peerId ?? tunnel.peerId,
+          markStopped: () => {
+            stopped = true;
+          },
+        };
+        yield* Ref.set(activeRef, connector);
+        attached = true;
+        if (pendingReadinessSignal) {
+          Queue.offerUnsafe(readinessChanges, undefined);
+        }
+        if (pendingConnectedSignal) {
+          Queue.offerUnsafe(tunnelConnections, undefined);
+        }
+        yield* Effect.forkIn(
+          restore(
+            Stream.fromQueue(statusLogQueue).pipe(
+              Stream.runForEach((event) =>
+                event.state === "connected"
+                  ? Effect.logInfo("libp2p tunnel connector connected", {
+                      pid,
+                      peerId: event.peerId,
+                      tunnelId: config.tunnelId,
+                      tunnelName: config.tunnelName,
+                    })
+                  : Effect.logWarning("libp2p tunnel status changed", {
+                      pid,
+                      state: event.state,
+                      peerId: event.peerId,
+                      ...(event.error ? { error: event.error } : {}),
+                    }),
+              ),
+              Effect.ignoreCause,
+            ),
+          ),
+          connectorScope,
+        );
+      }),
+    );
+
+    yield* Effect.logInfo("libp2p tunnel connector started", {
+      pid,
+      peerId: tunnel.peerId,
+      originUrl,
+      publicHttpBaseUrl,
+      tunnelId: config.tunnelId,
+      tunnelName: config.tunnelName,
+    });
 
     return {
-      status: "failed",
-      providerKind: "cloudflare_tunnel",
-      failure: "spawn-failed",
-      reason: "Relay client did not start.",
+      status: "running",
+      providerKind: "libp2p_tunnel",
+      pid,
+      peerId: tunnel.peerId,
       ...(config.tunnelId ? { tunnelId: config.tunnelId } : {}),
       ...(config.tunnelName ? { tunnelName: config.tunnelName } : {}),
     } satisfies CloudManagedEndpointRuntimeStatus;
   });
 
-  const applyConfig = Effect.fn("CloudManagedEndpointRuntime.applyConfig")(
-    (requested: RelayManagedEndpointRuntimeConfig | null) =>
-      reconcileSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const config = connectAllowed ? requested : null;
-          // Keep backoff when recovery returns the same tunnel/token, or every recovery respawns a crash loop.
-          const desired = yield* Ref.get(desiredConfigRef);
-          const unchanged =
-            desired !== null &&
-            config !== null &&
-            runtimeConfigKey(desired) === runtimeConfigKey(config);
-          if (!unchanged) {
-            yield* Ref.set(restartDelayRef, 0);
-          }
-          yield* Ref.set(desiredConfigRef, config);
-          return yield* reconcileConfig(config);
-        }),
-      ),
-    withRelayClientLog,
-  );
+  const applyConfig: CloudManagedEndpointRuntime["Service"]["applyConfig"] = Effect.fn(
+    "CloudManagedEndpointRuntime.applyConfig",
+  )(function* (requested, options) {
+    return yield* reconcileSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const config = connectAllowed ? requested : null;
+        yield* Ref.set(desiredConfigRef, config);
+        return yield* reconcileConfig(config, options);
+      }),
+    );
+  }, withRelayClientLog);
+
+  const setLocalOrigin: CloudManagedEndpointRuntime["Service"]["setLocalOrigin"] = Effect.fn(
+    "CloudManagedEndpointRuntime.setLocalOrigin",
+  )(function* (origin) {
+    yield* Ref.set(localOriginRef, origin);
+  });
 
   const restartConnector = Effect.fn("CloudManagedEndpointRuntime.restartConnector")(function* (
     pid: number,
     stillDead: Effect.Effect<boolean>,
   ) {
     const active = yield* Ref.get(activeRef);
-    if (!active || Number(active.child.pid) !== pid || !(yield* stillDead)) return false;
+    if (!active || active.pid !== pid || !(yield* stillDead)) return false;
     yield* Effect.logWarning(
-      "Cloudflare has no live connection from the relay client; restarting it",
+      "Relay has no live libp2p connection from this connector; restarting it",
       { pid, tunnelId: active.config.tunnelId, tunnelName: active.config.tunnelName },
     );
-    // The supervisor starts the replacement with its usual crash-loop backoff.
-    return yield* active.child.kill().pipe(
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
-    );
+    yield* stopActive;
+    const desired = yield* Ref.get(desiredConfigRef);
+    if (!desired || desired.providerKind !== "libp2p_tunnel") return false;
+    yield* reconcileConfig(desired);
+    return true;
   }, reconcileSemaphore.withPermits(1));
-
-  const readMetrics = <S extends Schema.Decoder<unknown>>(url: string, schema: S) =>
-    httpClient.get(url).pipe(
-      Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-      Effect.scoped,
-      Effect.withTracerEnabled(false),
-      Effect.timeoutOption(CONNECTOR_READINESS_REQUEST_TIMEOUT),
-      Effect.map(Option.getOrNull),
-      Effect.orElseSucceed(() => null),
-    );
 
   const inspectConnector = Effect.gen(function* () {
     const active = yield* Ref.get(activeRef);
-    if (!active || !(yield* active.child.isRunning.pipe(Effect.orElseSucceed(() => false)))) {
-      return null;
-    }
-    const pid = Number(active.child.pid);
-    const protocol = yield* Ref.get(active.protocol);
-    if (!(yield* Deferred.isDone(active.metricsAddress))) {
-      return {
-        pid,
-        readyConnections: null,
-        hostname: null,
-        origin: null,
-        protocol,
-      } satisfies ConnectorFacts;
-    }
-    const metricsUrl = `http://${yield* Deferred.await(active.metricsAddress)}`;
-    const [ready, config] = yield* Effect.all(
-      [
-        readMetrics(`${metricsUrl}/ready`, ConnectorReadyBody),
-        readMetrics(`${metricsUrl}/config`, ConnectorConfigBody),
-      ],
-      { concurrency: 2 },
-    );
-    const hostnameRule = config?.config.ingress?.find((rule) => rule.hostname);
+    if (!active) return null;
     return {
-      pid,
-      readyConnections: ready?.readyConnections ?? null,
-      hostname: hostnameRule?.hostname ?? null,
-      origin: hostnameRule?.service ?? null,
-      protocol,
+      pid: active.pid,
+      readyConnections: active.getReadyConnections(),
+      hostname: active.hostname,
+      origin: active.originUrl,
+      protocol: "libp2p",
+      publicHttpBaseUrl: active.publicHttpBaseUrl,
+      peerId: active.getPeerId(),
     } satisfies ConnectorFacts;
   });
 
   const runtime = CloudManagedEndpointRuntime.of({
     applyConfig,
+    setLocalOrigin,
     inspectConnector,
     readinessChanged: Stream.fromQueue(readinessChanges),
     recoveryRequests: Stream.fromQueue(recoveryRequests),
@@ -984,4 +623,7 @@ export const make = Effect.gen(function* () {
   return runtime;
 });
 
-export const layer = Layer.effect(CloudManagedEndpointRuntime, make);
+export const layer = Layer.effect(CloudManagedEndpointRuntime, make());
+
+export const layerWithFactory = (createTunnel: CreateEnvironmentLibp2pTunnelFn) =>
+  Layer.effect(CloudManagedEndpointRuntime, make({ createTunnel }));

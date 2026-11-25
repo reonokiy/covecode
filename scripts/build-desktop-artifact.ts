@@ -17,7 +17,6 @@ import {
 
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
@@ -242,8 +241,8 @@ export class KeyringNativePackageMissingError extends Schema.TaggedError<Keyring
   }
 }
 
-export class ClerkPasskeyNativePackageMissingError extends Schema.TaggedError<ClerkPasskeyNativePackageMissingError>()(
-  "ClerkPasskeyNativePackageMissingError",
+export class PasskeyNativePackageMissingError extends Schema.TaggedError<PasskeyNativePackageMissingError>()(
+  "PasskeyNativePackageMissingError",
   {
     packageName: Schema.String,
     binaryFileName: Schema.String,
@@ -254,7 +253,7 @@ export class ClerkPasskeyNativePackageMissingError extends Schema.TaggedError<Cl
   },
 ) {
   override get message(): string {
-    return `Clerk passkey native package is missing: ${this.packageName}`;
+    return `Passkey native package is missing: ${this.packageName}`;
   }
 }
 
@@ -1173,23 +1172,12 @@ export class MissingMacPasskeyProvisioningProfileError extends Schema.TaggedErro
   }
 }
 
-export class MissingMacPasskeyDomainConfigurationError extends Schema.TaggedError<MissingMacPasskeyDomainConfigurationError>()(
-  "MissingMacPasskeyDomainConfigurationError",
+export class MissingMacPasskeyRpDomainsError extends Schema.TaggedError<MissingMacPasskeyRpDomainsError>()(
+  "MissingMacPasskeyRpDomainsError",
   {},
 ) {
   override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY or T3CODE_CLERK_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
-  }
-}
-
-export class InvalidMacPasskeyPublishableKeyError extends Schema.TaggedError<InvalidMacPasskeyPublishableKeyError>()(
-  "InvalidMacPasskeyPublishableKeyError",
-  {
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "T3CODE_CLERK_PUBLISHABLE_KEY is invalid.";
+    return "T3CODE_PASSKEY_RP_DOMAINS is required for signed macOS passkey builds.";
   }
 }
 
@@ -1198,7 +1186,7 @@ export class MissingMacPasskeyRpDomainError extends Schema.TaggedError<MissingMa
   {},
 ) {
   override get message(): string {
-    return "At least one Clerk passkey RP domain is required.";
+    return "At least one passkey RP domain is required.";
   }
 }
 
@@ -1206,8 +1194,7 @@ export const MacPasskeySigningConfigurationError = Schema.Union([
   InvalidMacPasskeyRpDomainError,
   InvalidAppleTeamIdError,
   MissingMacPasskeyProvisioningProfileError,
-  MissingMacPasskeyDomainConfigurationError,
-  InvalidMacPasskeyPublishableKeyError,
+  MissingMacPasskeyRpDomainsError,
   MissingMacPasskeyRpDomainError,
 ]);
 export type MacPasskeySigningConfigurationError = typeof MacPasskeySigningConfigurationError.Type;
@@ -1267,23 +1254,11 @@ export function resolveMacPasskeySigningConfiguration(
     throw new MissingMacPasskeyProvisioningProfileError();
   }
 
-  const configuredRpDomains = env.T3CODE_CLERK_PASSKEY_RP_DOMAINS?.trim();
-  let rpDomains: readonly string[];
-  if (configuredRpDomains) {
-    rpDomains = configuredRpDomains.split(",").map(normalizePasskeyRpDomain);
-  } else {
-    const publishableKey = env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim();
-    if (!publishableKey) {
-      throw new MissingMacPasskeyDomainConfigurationError();
-    }
-    let hostname: string;
-    try {
-      hostname = clerkFrontendApiHostnameFromPublishableKey(publishableKey);
-    } catch (cause) {
-      throw new InvalidMacPasskeyPublishableKeyError({ cause });
-    }
-    rpDomains = [normalizePasskeyRpDomain(hostname)];
+  const configuredRpDomains = env.T3CODE_PASSKEY_RP_DOMAINS?.trim();
+  if (!configuredRpDomains) {
+    throw new MissingMacPasskeyRpDomainsError();
   }
+  const rpDomains = configuredRpDomains.split(",").map(normalizePasskeyRpDomain);
 
   const uniqueRpDomains = [...new Set(rpDomains)];
   if (uniqueRpDomains.length === 0) {
@@ -1461,15 +1436,15 @@ export const stageCursorSdkPlatformPackages = Effect.fn("stageCursorSdkPlatformP
   },
 );
 
-export interface ClerkPasskeyNativeArtifact {
+export interface PasskeyNativeArtifact {
   readonly packageName: string;
   readonly binaryFileName: string;
 }
 
-export function resolveClerkPasskeyNativeArtifacts(
+export function resolvePasskeyNativeArtifacts(
   platform: typeof BuildPlatform.Type,
   arch: typeof BuildArch.Type,
-): readonly ClerkPasskeyNativeArtifact[] {
+): readonly PasskeyNativeArtifact[] {
   const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
 
   if (platform === "mac") {
@@ -1492,7 +1467,7 @@ export function resolveClerkPasskeyNativeArtifacts(
 export function resolveKeyringNativeArtifacts(
   platform: typeof BuildPlatform.Type,
   arch: typeof BuildArch.Type,
-): readonly ClerkPasskeyNativeArtifact[] {
+): readonly PasskeyNativeArtifact[] {
   const architectures = arch === "universal" ? (["arm64", "x64"] as const) : [arch];
 
   if (platform === "mac") {
@@ -1546,8 +1521,8 @@ const stageKeyringNativeBinaries = Effect.fn("stageKeyringNativeBinaries")(funct
   }
 });
 
-// Stage pnpm-nested Clerk binaries beside index.js so the loader finds them and electron-builder unpacks them.
-const stageClerkPasskeyNativeBinaries = Effect.fn("stageClerkPasskeyNativeBinaries")(function* (
+// Stage pnpm-nested passkey binaries beside index.js so the loader finds them and electron-builder unpacks them.
+const stagePasskeyNativeBinaries = Effect.fn("stagePasskeyNativeBinaries")(function* (
   stageAppDir: string,
   platform: typeof BuildPlatform.Type,
   arch: typeof BuildArch.Type,
@@ -1560,11 +1535,11 @@ const stageClerkPasskeyNativeBinaries = Effect.fn("stageClerkPasskeyNativeBinari
   const packageDir = path.dirname(packageEntryPath);
   const packageRequire = NodeModule.createRequire(packageEntryPath);
 
-  for (const artifact of resolveClerkPasskeyNativeArtifacts(platform, arch)) {
+  for (const artifact of resolvePasskeyNativeArtifacts(platform, arch)) {
     const sourcePath = yield* Effect.try({
       try: () => packageRequire.resolve(artifact.packageName),
       catch: (cause) =>
-        new ClerkPasskeyNativePackageMissingError({
+        new PasskeyNativePackageMissingError({
           packageName: artifact.packageName,
           binaryFileName: artifact.binaryFileName,
           packageEntryPath,
@@ -3980,7 +3955,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     }),
     { label: "vp install --prod", verbose: options.verbose },
   );
-  yield* stageClerkPasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
+  yield* stagePasskeyNativeBinaries(stageAppDir, options.platform, options.arch);
   yield* stageKeyringNativeBinaries(stageAppDir, options.platform, options.arch);
 
   if (options.platform === "win" && windowsServerAsarPath) {

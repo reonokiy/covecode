@@ -148,12 +148,12 @@ export default mergeConfig(
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __T3CODE_TELEMETRY_CHANNEL__: JSON.stringify(telemetryChannel),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
-        __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
-          repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
+        __T3CODE_BUILD_OIDC_ISSUER__: JSON.stringify(repoEnv.T3CODE_OIDC_ISSUER?.trim() ?? ""),
+        __T3CODE_BUILD_OIDC_CLIENT_ID__: JSON.stringify(
+          repoEnv.T3CODE_OIDC_CLIENT_ID?.trim() ?? "",
         ),
-        __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
-          repoEnv.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
-        ),
+        __T3CODE_BUILD_OIDC_AUDIENCE__: JSON.stringify(repoEnv.T3CODE_OIDC_AUDIENCE?.trim() ?? ""),
+        __T3CODE_BUILD_OIDC_SCOPES__: JSON.stringify(repoEnv.T3CODE_OIDC_SCOPES?.trim() ?? ""),
         __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
           repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
         ),

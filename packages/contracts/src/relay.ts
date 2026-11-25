@@ -152,9 +152,13 @@ export const RelayAgentActivityAggregateState = Schema.Struct({
 });
 export type RelayAgentActivityAggregateState = typeof RelayAgentActivityAggregateState.Type;
 
+export const RelayTunnelTransportMode = Schema.Literals(["p2p", "relay"]);
+export type RelayTunnelTransportMode = typeof RelayTunnelTransportMode.Type;
+
 export const RelayManagedEndpointProviderKind = Schema.Literals([
   "manual",
   "cloudflare_tunnel",
+  "libp2p_tunnel",
   "t3_relay",
 ]);
 export type RelayManagedEndpointProviderKind = typeof RelayManagedEndpointProviderKind.Type;
@@ -163,6 +167,9 @@ export const RelayManagedEndpoint = Schema.Struct({
   httpBaseUrl: TrimmedNonEmptyString,
   wsBaseUrl: TrimmedNonEmptyString,
   providerKind: RelayManagedEndpointProviderKind,
+  libp2pPeerId: Schema.optional(TrimmedNonEmptyString),
+  libp2pRelayMultiaddrs: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  transportMode: Schema.optional(RelayTunnelTransportMode),
 });
 export type RelayManagedEndpoint = typeof RelayManagedEndpoint.Type;
 
@@ -180,6 +187,10 @@ export const RelayManagedEndpointRuntimeConfig = Schema.Struct({
   connectorToken: TrimmedNonEmptyString,
   tunnelId: Schema.optional(TrimmedNonEmptyString),
   tunnelName: Schema.optional(TrimmedNonEmptyString),
+  endpointKey: Schema.optional(TrimmedNonEmptyString),
+  publicHttpBaseUrl: Schema.optional(TrimmedNonEmptyString),
+  relayMultiaddrs: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  transportMode: Schema.optional(RelayTunnelTransportMode),
 });
 export type RelayManagedEndpointRuntimeConfig = typeof RelayManagedEndpointRuntimeConfig.Type;
 
@@ -655,6 +666,7 @@ export class RelayClientPrincipal extends Context.Service<
   {
     readonly userId: string;
     readonly token: string;
+    readonly email?: string | undefined;
     readonly proofKeyThumbprint?: string;
     readonly dpopScopes?: ReadonlyArray<RelayDpopAccessTokenScope>;
   }
@@ -821,6 +833,28 @@ export const RelayProtectedResourceMetadata = Schema.Struct({
   dpop_bound_access_tokens_required: Schema.Boolean,
   dpop_signing_alg_values_supported: Schema.Array(Schema.Literal("ES256")),
 });
+
+export const RelayControlPlaneOidcConfig = Schema.Struct({
+  issuer: TrimmedNonEmptyString,
+  clientId: TrimmedNonEmptyString,
+  audience: Schema.NullOr(TrimmedNonEmptyString),
+  scopes: Schema.Array(TrimmedNonEmptyString),
+});
+export type RelayControlPlaneOidcConfig = typeof RelayControlPlaneOidcConfig.Type;
+
+export const RelayControlPlaneLibp2pConfig = Schema.Struct({
+  enabled: Schema.Boolean,
+  peerId: Schema.NullOr(TrimmedNonEmptyString),
+  relayMultiaddrs: Schema.Array(TrimmedNonEmptyString),
+});
+export type RelayControlPlaneLibp2pConfig = typeof RelayControlPlaneLibp2pConfig.Type;
+
+export const RelayControlPlanePublicConfig = Schema.Struct({
+  controlPlaneUrl: TrimmedNonEmptyString,
+  oidc: Schema.NullOr(RelayControlPlaneOidcConfig),
+  libp2p: RelayControlPlaneLibp2pConfig,
+});
+export type RelayControlPlanePublicConfig = typeof RelayControlPlanePublicConfig.Type;
 
 export const RelayEnvironmentUnlinkParams = Schema.Struct({
   environmentId: EnvironmentId,
@@ -1021,6 +1055,9 @@ const RelayMetadataGroup = HttpApiGroup.make("metadata")
     HttpApiEndpoint.get("protectedResource", "/.well-known/oauth-protected-resource", {
       success: RelayProtectedResourceMetadata,
     }).annotate(OpenApi.Summary, "Read OAuth protected-resource metadata"),
+    HttpApiEndpoint.get("controlPlaneConfig", "/.well-known/cove-control-plane", {
+      success: RelayControlPlanePublicConfig,
+    }).annotate(OpenApi.Summary, "Read self-hosted control plane OIDC and libp2p configuration"),
   )
   .annotate(OpenApi.Description, "OAuth and DPoP discovery metadata.");
 

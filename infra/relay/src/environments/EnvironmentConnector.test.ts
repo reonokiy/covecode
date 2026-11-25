@@ -26,6 +26,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import * as CloudMintSigner from "../auth/CloudMintSigner.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as RelayConfiguration from "../Config.ts";
+import { makeTestRelayConfiguration } from "../testConfig.ts";
 import * as EnvironmentConnector from "./EnvironmentConnector.ts";
 import * as ManagedEndpointAllocations from "./ManagedEndpointAllocations.ts";
 
@@ -58,19 +59,7 @@ function requestBodyText(request: HttpClientRequest.HttpClientRequest): string {
   return request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "{}";
 }
 
-const settings = RelayConfiguration.RelayConfiguration.of({
-  relayIssuer: "https://relay.example.test",
-  apns: {
-    environment: "sandbox",
-    teamId: "team-id",
-    keyId: "key-id",
-    privateKey: Redacted.make("private-key"),
-    bundleId: "net.nokiy.cove.dev",
-  },
-  apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
-  clerkSecretKey: Redacted.make("clerk-secret"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+const settings = makeTestRelayConfiguration({
   cloudMintPrivateKey: Redacted.make(cloudKeyPair.privateKey),
   cloudMintPublicKey: cloudKeyPair.publicKey,
   managedEndpointBaseDomain: "example.test",
@@ -222,7 +211,7 @@ function makeLinks(
         endpoint: {
           httpBaseUrl: "https://env.example.test/",
           wsBaseUrl: "wss://env.example.test/ws",
-          providerKind: "cloudflare_tunnel",
+          providerKind: "libp2p_tunnel",
         },
         linkedAt: "2026-05-25T00:00:00.000Z",
         environmentPublicKey: environmentKeyPair.publicKey,
@@ -376,7 +365,7 @@ describe("EnvironmentConnector", () => {
             endpoint: {
               httpBaseUrl: "https://attacker.example.test/",
               wsBaseUrl: "wss://attacker.example.test/ws",
-              providerKind: "cloudflare_tunnel",
+              providerKind: "libp2p_tunnel",
             },
           }),
         }),

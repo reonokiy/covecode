@@ -103,7 +103,7 @@ describe("EnvironmentLinks", () => {
             ...row,
             endpointHttpBaseUrl: "https://environment.test",
             endpointWsBaseUrl: "wss://environment.test",
-            endpointProviderKind: "cloudflare_tunnel",
+            endpointProviderKind: "libp2p_tunnel",
             createdAt: timestamp,
             updatedAt: timestamp,
           })),

@@ -84,11 +84,9 @@ export const filterRelayResponse = Effect.fn("cloud.filter_relay_response")(func
   const decoded = yield* HttpClientResponse.schemaBodyJson(RelayProtectedError)(response).pipe(
     Effect.option,
   );
-  const ray = response.headers["cf-ray"];
-  const requestId = ray && /^[a-zA-Z0-9-]{1,128}$/.test(ray) ? ` Cloudflare Ray ID: ${ray}.` : "";
   const description = Option.isSome(decoded)
     ? `T3 Connect: ${decoded.value.message}. ${recoveryHint(decoded.value)} Trace ID: ${decoded.value.traceId}.`
-    : `T3 Connect relay returned HTTP ${response.status} without a recognized error response. Check relay access and any proxy or firewall restrictions, then restart Cove Code.${requestId}`;
+    : `T3 Connect relay returned HTTP ${response.status} without a recognized error response. Check relay access and any proxy or firewall restrictions, then restart Cove Code.`;
 
   // Only a schema-decoded expired-proof 401 is retryable for clock skew; every other 401 is permanent.
   if (

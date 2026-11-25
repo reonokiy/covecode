@@ -105,9 +105,10 @@ export const layerRemoteHttpClient = (
     HttpObservability.layer,
   );
 
-const remoteApiBaseUrl = (httpBaseUrl: string): string => {
+export const remoteApiBaseUrl = (httpBaseUrl: string): string => {
   const url = new URL(httpBaseUrl);
-  url.pathname = "/";
+  const basePath = url.pathname.replace(/\/+$/gu, "");
+  url.pathname = basePath.length > 0 && basePath !== "/" ? `${basePath}/` : "/";
   url.search = "";
   url.hash = "";
   return url.toString();

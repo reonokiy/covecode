@@ -4936,6 +4936,9 @@
     },
     " och välj sedan Uppdatera."
   ],
+  "edaebeea1915f9c1": "Konto",
+  "a656dc69a38a3639": "Sign out",
+  "daf8daec701f0863": "Konto",
   "cf09d31e268af127": "Försök med T3 Connect igen",
   "6fa695d3a822bb9e": "Logga in på T3 Connect",
   "b28a147f66b0e088": "Länkdatumet är inte tillgängligt",
@@ -4991,13 +4994,6 @@
   "ce6b7e994161e68f": "Lägg till rutt",
   "d3ef4f9486e31279": "Lägg till",
   "c246e33dafd359cc": "Lägg till",
-  "b0c1beb79a87d97b": "Auktoriseringsbegäran",
-  "0311d7ed2b7eb2f6": "Den här anslutningslänken är ofullständig",
-  "09e69d04f7e588eb": "Länken saknar sin auktoriseringsbegäran. Kör `t3 connect` igen i terminalen och öppna den nyutskrivna URL:en.",
-  "55ee748307f0cd6a": "Auktorisering i webbläsaren",
-  "1ccae6b48df9cf15": "Ansluter din terminal",
-  "b3e7da67bc047933": "Omdirigerar för att auktorisera T3 Connect för ditt CLI…",
-  "bb4cbcc32d3caec8": "Logga in för att fortsätta auktorisera T3 Connect för ditt CLI.",
   "b6cc9af7a6d5e31b": "Publicera",
   "a624f5a1c3936a6b": "Anslut enheter",
   "2e7604ad4afe0231": "T3 Connect är aktiverat",
@@ -7694,15 +7690,15 @@
   "e1fcc4b74faaae02": "Ta bort kortkommando…",
   "efa55bbb1d3aa45e": "Granska ändringar",
   "3e02b74615e20d82": "Manuell konfiguration",
-  "99950f160873dfdf": [
-    "Stäng av inspelning i Cove Code för att stoppa den. Ta bort kortkommandot från ",
+  "84a8564b355b66bd": [
+    "Turn capture off in Cove Code to stop it. Remove the shortcut from",
+    " ",
     {
       "i": 1,
       "k": "_gt_value_1",
       "v": "v"
     },
-    " ",
-    "för att frigöra tangenterna."
+    " to free up the keys."
   ],
   "4bf700ad94c0c486": "Jag har lagt till kortkommandot",
   "bcdea6ebe1a65e63": "ChatGPT-konto att ansluta",
@@ -8960,7 +8956,6 @@
   "39a7578443219b8f": "Inloggningen hos leverantören misslyckades. Försök igen.",
   "179d3c67e76bb669": "Inloggningslänken är inte en webbadress, så den öppnades inte.",
   "d80e10905a0fb8fb": "Kunde inte öppna inloggningssidan. Kopiera länken och öppna den i din webbläsare.",
-  "edaebeea1915f9c1": "Konto",
   "249cfb7532e0b380": "Inloggningsmetod",
   "8e184b3520eac9bc": "Leverantörens standard",
   "1dea42922c13841d": "Kopiera inloggningslänk",
@@ -9638,7 +9633,6 @@
     },
     " kan läsa värden från den via namn. Värden läses med op-CLI:t på den servern när en leverantör startar."
   ],
-  "daf8daec701f0863": "Konto",
   "c3d6c8494c7d4b8f": "Kontots kortnamn, inloggningsadressen utan https:// eller id:t som op account list visar.",
   "afa8b4a2e025dd36": "Värde",
   "13f8f1e086293635": "Källa för {label}",

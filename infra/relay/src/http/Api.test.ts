@@ -9,11 +9,9 @@ import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as Devices from "../agentActivity/Devices.ts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no generateKeyPairSync.
 import * as NodeCrypto from "node:crypto";
-import { createClerkClient, verifyToken } from "@clerk/backend";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { vi } from "vite-plus/test";
 import * as Context from "effect/Context";
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
 import * as DateTime from "effect/DateTime";
@@ -40,6 +38,7 @@ import {
   RelayEnvironmentLinkUnavailableError,
   RelayEnvironmentLinkRequest,
 } from "@t3tools/contracts/relay";
+import { OidcError, type OidcVerifiedPrincipal } from "@t3tools/shared/oidc";
 import { relayProtectedErrorMessage } from "@t3tools/client-runtime/relay";
 import { RELAY_MANAGED_TUNNEL_RECOVERY_TYP, signRelayJwt } from "@t3tools/shared/relayJwt";
 
@@ -50,17 +49,19 @@ import {
   relayDpopFailureReason,
   traceRelayHttpRequestWith,
   unlinkEnvironmentRecord,
-  verifyRelayClientBearerToken,
   verifyEnvironmentTunnelRecoveryProof,
   withoutCapturedParentSpan,
 } from "./Api.ts";
 import * as RelayHttpApi from "./Api.ts";
 import * as RelayConfiguration from "../Config.ts";
+import { makeTestRelayConfiguration } from "../testConfig.ts";
 import * as RelayDb from "../db.ts";
+import * as OidcAuth from "../auth/OidcAuth.ts";
 import * as EnvironmentCredentials from "../environments/EnvironmentCredentials.ts";
 import * as HeldHooks from "../hooks/HeldHooks.ts";
 import * as HookInbox from "../hooks/HookInbox.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
+import * as Libp2pTunnelRegistry from "../environments/Libp2pTunnelRegistry.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
 import * as ManagedTunnelLimits from "../environments/ManagedTunnelLimits.ts";
@@ -68,29 +69,20 @@ import * as AgentActivityPublisher from "../agentActivity/AgentActivityPublisher
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
 import * as T3ChatAccounts from "../t3chat/T3ChatAccounts.ts";
 
-vi.mock("@clerk/backend", () => ({
-  createClerkClient: vi.fn(),
-  verifyToken: vi.fn(),
-}));
-
-const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
-  relayIssuer: "https://relay.example.test",
-  apns: {
-    teamId: "apns-team",
-    keyId: "apns-key",
-    privateKey: Redacted.make("apns-private-key"),
-    bundleId: "com.example.t3",
-    environment: "sandbox",
+const relaySettings = makeTestRelayConfiguration({
+  oidc: {
+    issuer: "https://auth.example.test",
+    clientId: "cove-test-client",
+    audience: "t3-code-relay",
+    scopes: ["openid", "profile", "email"],
   },
-  clerkSecretKey: Redacted.make("clerk-secret-key"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
-  apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
-  cloudMintPrivateKey: Redacted.make("cloud-mint-private-key"),
-  cloudMintPublicKey: "cloud-mint-public-key",
-  managedEndpointBaseDomain: undefined,
-  managedEndpointNamespace: undefined,
-};
+  libp2p: {
+    enabled: true,
+    listenMultiaddrs: [],
+    announceMultiaddrs: ["/dns4/relay.example.test/tcp/4002/wss"],
+    tunnelSecret: Redacted.make("test-tunnel-secret"),
+  },
+});
 
 const encodeLinkRequest = Schema.encodeEffect(Schema.fromJsonString(RelayEnvironmentLinkRequest));
 const decodeLinkUnavailableError = Schema.decodeUnknownEffect(RelayEnvironmentLinkUnavailableError);
@@ -120,7 +112,7 @@ describe("managed endpoint provisioning errors", () => {
                 return yield* new ManagedEndpointProvider.ManagedEndpointProvisioningFailed({
                   userId: "user-1",
                   environmentId: "environment-1",
-                  stage: "ensure-tunnel",
+                  stage: "record-tunnel",
                   tunnelId: "private-tunnel-id",
                   cause: new Error("private-provider-token"),
                 });
@@ -180,12 +172,12 @@ describe("managed endpoint provisioning errors", () => {
         _tag: "RelayEnvironmentLinkUnavailableError",
         code: "environment_link_unavailable",
         reason: "managed_endpoint_provisioning_failed",
-        provisioningStage: "ensure-tunnel",
+        provisioningStage: "record-tunnel",
         traceId,
       });
       const error = yield* decodeLinkUnavailableError(body);
       expect(relayProtectedErrorMessage(error)).toBe(
-        "Relay cannot provision the managed endpoint (managed_endpoint_provisioning_failed). Failed stage: ensure-tunnel.",
+        "Relay cannot provision the managed endpoint (managed_endpoint_provisioning_failed). Failed stage: record-tunnel.",
       );
     }).pipe(Effect.scoped);
   });
@@ -287,158 +279,122 @@ describe("device listing compatibility", () => {
   });
 });
 
-describe("Cloudflare rate-limit retry hint", () => {
-  const provisioningFailed = (cause?: unknown) =>
-    new ManagedEndpointProvider.ManagedEndpointProvisioningFailed({
-      userId: "user-1",
-      environmentId: "env-1",
-      stage: "ensure-tunnel",
-      ...(cause === undefined
-        ? {}
-        : {
-            cause: new ManagedEndpointProvider.ManagedEndpointTunnelClientError({
-              operation: "list",
-              cause,
-            }),
-          }),
-    });
-
-  const linkResponse = (failure: ManagedEndpointProvider.ManagedEndpointProvisioningFailed) => {
-    const layerHandlers = RelayHttpApi.layerClientApi.pipe(
-      HttpRouter.provideRequest(
-        Layer.mergeAll(
-          Layer.mock(EnvironmentCredentials.EnvironmentCredentials, {}),
-          Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
-          Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
-          Layer.mock(RelayDb.RelayTransactions, {}),
-          Layer.mock(HookInbox.HookInbox, {}),
-        ),
-      ),
-      Layer.provide(
-        Layer.mergeAll(
-          Layer.succeed(RelayConfiguration.RelayConfiguration, relaySettings),
-          NodeCryptoLayer.layer,
-          Layer.mock(RelayTokens.RelayTokens, { resolveDpopAccessTokenScopes: () => null }),
-          Layer.mock(EnvironmentLinker.EnvironmentLinker, { link: () => Effect.fail(failure) }),
-          Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
-          Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
-          Layer.mock(Devices.Devices, {}),
-          Layer.mock(T3ChatAccounts.T3ChatAccounts, { available: false }),
-          Layer.mock(ManagedTunnelLimits.ManagedTunnelLimits, {}),
-        ),
-      ),
-      Layer.provideMerge(
-        Layer.succeed(RelayClientAuth, {
-          clientBearer: (effect) =>
-            Effect.provideService(effect, RelayClientPrincipal, {
-              userId: "user-1",
-              token: "test-token",
-            }),
-        }),
-      ),
-    );
-    return Effect.acquireRelease(
-      Effect.sync(() =>
-        HttpRouter.toWebHandler(
-          HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.client)).pipe(
-            Layer.provide(layerHandlers),
-            Layer.provide(HttpServer.layerServices),
-          ),
-          { disableLogger: true },
-        ),
-      ),
-      (app) => Effect.promise(() => app.dispose()),
-    ).pipe(
-      Effect.flatMap((app) =>
-        Effect.promise(() =>
-          app.handler(
-            new Request("https://relay.example.test/v1/client/environment-links", {
-              method: "POST",
-              headers: { authorization: "Bearer test-token", "content-type": "application/json" },
-              body: JSON.stringify({
-                proof: "signed-proof",
-                notificationsEnabled: true,
-                liveActivitiesEnabled: true,
-                managedTunnelsEnabled: true,
+describe("control plane public metadata & OIDC client authentication", () => {
+  it.effect(
+    "exposes OIDC and libp2p public configuration at /.well-known/cove-control-plane",
+    () => {
+      const metadataHandlers = RelayHttpApi.layerMetadataApi.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(RelayConfiguration.RelayConfiguration, relaySettings),
+            Layer.succeed(
+              Libp2pTunnelRegistry.Libp2pTunnelRegistry,
+              Libp2pTunnelRegistry.Libp2pTunnelRegistry.of({
+                enabled: true,
+                peerId: "12D3KooWTestPeerId",
+                getMultiaddrs: () => ["/ip4/127.0.0.1/tcp/4002/ws"],
+                getEndpointRegistration: () => null,
+                isEndpointConnected: () => false,
+                proxyHttpRequest: async () => {},
+                proxyUpgrade: async () => {},
               }),
-            }),
+            ),
           ),
-        ),
-      ),
-    );
-  };
-
-  it.effect("tells a link refused during a Cloudflare pause when to retry", () =>
-    Effect.gen(function* () {
-      const paused = yield* linkResponse(
-        provisioningFailed(
-          new ManagedEndpointProvider.CloudflareApiPaused({ retryAfterMillis: 24_100 }),
         ),
       );
-      expect(paused.status).toBe(503);
-      expect(paused.headers.get("retry-after")).toBe("25");
-
-      const other = yield* linkResponse(provisioningFailed());
-      expect(other.status).toBe(503);
-      expect(other.headers.get("retry-after")).toBeNull();
-    }).pipe(Effect.scoped),
+      return Effect.gen(function* () {
+        const app = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            HttpRouter.toWebHandler(
+              HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.metadata)).pipe(
+                Layer.provide(metadataHandlers),
+                Layer.provide(HttpServer.layerServices),
+              ),
+              { disableLogger: true },
+            ),
+          ),
+          (app) => Effect.promise(() => app.dispose()),
+        );
+        const response = yield* Effect.promise(() =>
+          app.handler(new Request("https://relay.example.test/.well-known/cove-control-plane")),
+        );
+        expect(response.status).toBe(200);
+        expect(yield* Effect.promise(() => response.json())).toEqual({
+          controlPlaneUrl: "https://relay.example.test",
+          oidc: {
+            issuer: "https://auth.example.test",
+            clientId: "cove-test-client",
+            audience: "t3-code-relay",
+            scopes: ["openid", "profile", "email"],
+          },
+          libp2p: {
+            enabled: true,
+            peerId: "12D3KooWTestPeerId",
+            relayMultiaddrs: ["/dns4/relay.example.test/tcp/4002/wss"],
+          },
+        });
+      }).pipe(Effect.scoped);
+    },
   );
-});
 
-describe("relay client authentication", () => {
-  it.effect("preserves the existing Clerk session JWT path", () =>
-    Effect.gen(function* () {
-      vi.mocked(verifyToken).mockResolvedValue({
-        sub: "user_session",
-        aud: relaySettings.clerkJwtAudience,
-      } as never);
+  it.effect("authenticates client bearer tokens with OidcAuth and rejects invalid tokens", () => {
+    let capturedPrincipal: typeof RelayClientPrincipal.Service | null = null;
+    return Effect.gen(function* () {
+      const auth = yield* RelayClientAuth;
+      yield* auth.clientBearer(
+        Effect.gen(function* () {
+          capturedPrincipal = yield* RelayClientPrincipal;
+          return HttpServerResponse.empty();
+        }),
+        {
+          credential: Redacted.make("valid-oidc-jwt"),
+          endpoint: {} as never,
+          group: {} as never,
+        },
+      );
+      expect(capturedPrincipal).toEqual({
+        userId: "oidc-user-1",
+        token: "valid-oidc-jwt",
+        email: "dev@example.test",
+      });
 
-      expect(yield* verifyRelayClientBearerToken(relaySettings, "session-token")).toEqual({
-        sub: "user_session",
-        mode: "clerk_session_bearer",
-      });
-      expect(verifyToken).toHaveBeenCalledWith("session-token", {
-        secretKey: "clerk-secret-key",
-        audience: relaySettings.clerkJwtAudience,
-      });
-      expect(createClerkClient).not.toHaveBeenCalled();
+      const rejected = yield* Effect.flip(
+        auth.clientBearer(Effect.succeed(HttpServerResponse.empty()), {
+          credential: Redacted.make("bad-oidc-jwt"),
+          endpoint: {} as never,
+          group: {} as never,
+        }),
+      );
+      expect(Predicate.isTagged(rejected, "RelayAuthInvalidError")).toBe(true);
     }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          vi.mocked(verifyToken).mockReset();
-          vi.mocked(createClerkClient).mockReset();
-        }),
+      Effect.provideService(
+        HttpServerRequest.HttpServerRequest,
+        HttpServerRequest.fromWeb(new Request("https://relay.test/v1/environments")),
       ),
-    ),
-  );
-
-  it.effect("falls back to Clerk OAuth token verification for the headless CLI", () =>
-    Effect.gen(function* () {
-      vi.mocked(verifyToken).mockRejectedValue(new Error("not a session JWT"));
-      vi.mocked(createClerkClient).mockReturnValue({
-        authenticateRequest: vi.fn().mockResolvedValue({
-          isAuthenticated: true,
-          toAuth: () => ({ userId: "user_oauth" }),
-        }),
-      } as never);
-
-      expect(yield* verifyRelayClientBearerToken(relaySettings, "oauth-token")).toEqual({
-        sub: "user_oauth",
-        mode: "clerk_oauth_bearer",
-      });
-      expect(createClerkClient).toHaveBeenCalledWith({
-        secretKey: "clerk-secret-key",
-        publishableKey: "pk_test_test",
-      });
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          vi.mocked(verifyToken).mockReset();
-          vi.mocked(createClerkClient).mockReset();
-        }),
+      Effect.provideService(HttpServerRequest.ParsedSearchParams, {}),
+      Effect.provideService(HttpRouter.RouteContext, {
+        params: {},
+        route: {} as never,
+      }),
+      Effect.provide(
+        RelayHttpApi.layerClientAuth.pipe(
+          Layer.provide(
+            OidcAuth.layerTest((token): Effect.Effect<OidcVerifiedPrincipal, OidcError> =>
+              token === "valid-oidc-jwt"
+                ? Effect.succeed({
+                    subject: "oidc-user-1",
+                    issuer: "https://auth.example.test",
+                    email: "dev@example.test",
+                    claims: { sub: "oidc-user-1", email: "dev@example.test" },
+                  })
+                : Effect.fail(new OidcError({ operation: "verify", reason: "invalid token" })),
+            ),
+          ),
+        ),
       ),
-    ),
-  );
+      Effect.scoped,
+    );
+  });
 });
 
 describe("relay DPoP failure mapping", () => {
@@ -571,7 +527,7 @@ const linkedEnvironmentRecord = {
   endpoint: {
     httpBaseUrl: "https://environment-1.example.test/",
     wsBaseUrl: "wss://environment-1.example.test/ws",
-    providerKind: "cloudflare_tunnel",
+    providerKind: "libp2p_tunnel",
   },
   environmentPublicKey: "public-key",
   linkedAt: "2026-07-28T00:00:00.000Z",
@@ -836,7 +792,7 @@ describe("relay managed tunnel recovery", () => {
       readonly environmentPublicKey: string;
     } | null = null;
     const runtime = {
-      providerKind: "cloudflare_tunnel" as const,
+      providerKind: "libp2p_tunnel" as const,
       connectorToken: "replacement-token",
       tunnelId: "replacement-tunnel",
     };
@@ -907,7 +863,7 @@ describe("relay managed tunnel recovery", () => {
                 provisioned = true;
                 return {
                   endpoint: linkedEnvironmentRecord.endpoint,
-                  runtime: { providerKind: "cloudflare_tunnel", connectorToken: "token" },
+                  runtime: { providerKind: "libp2p_tunnel", connectorToken: "token" },
                 };
               }),
           }),
@@ -977,10 +933,10 @@ describe("relay managed tunnel recovery", () => {
                 endpoint: {
                   httpBaseUrl: "https://different.example.test/",
                   wsBaseUrl: "wss://different.example.test/ws",
-                  providerKind: "cloudflare_tunnel",
+                  providerKind: "libp2p_tunnel",
                 },
                 runtime: {
-                  providerKind: "cloudflare_tunnel",
+                  providerKind: "libp2p_tunnel",
                   connectorToken: "token",
                   tunnelId: "replacement-tunnel",
                 },
@@ -1057,7 +1013,7 @@ describe("relay managed tunnel recovery", () => {
               Effect.succeed({
                 endpoint: linkedEnvironmentRecord.endpoint,
                 runtime: {
-                  providerKind: "cloudflare_tunnel",
+                  providerKind: "libp2p_tunnel",
                   connectorToken: "replacement-token",
                   tunnelId: "replacement-tunnel",
                 },
@@ -1127,7 +1083,7 @@ describe("relay environment unlink", () => {
                         new ManagedEndpointProvider.ManagedEndpointDeprovisioningFailed({
                           userId: input.userId,
                           environmentId: input.environmentId,
-                          stage: "delete-tunnel",
+                          stage: "remove-allocation",
                           cause: new Error("unavailable"),
                         }),
                       ),

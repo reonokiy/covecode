@@ -122,11 +122,15 @@ const main = Effect.gen(function* () {
         FetchHttpClient.layer,
         Layer.succeed(RelayConfiguration.RelayConfiguration, {
           relayIssuer: "http://localhost",
+          oidc: null,
+          libp2p: {
+            enabled: false,
+            listenMultiaddrs: [],
+            announceMultiaddrs: [],
+            tunnelSecret: Redacted.make(""),
+          },
           apns: null,
           fcmServiceAccount: Redacted.make(credentials),
-          clerkSecretKey: Redacted.make(""),
-          clerkPublishableKey: "",
-          clerkJwtAudience: "",
           apnsDeliveryJobSigningSecret: Redacted.make(""),
           cloudMintPrivateKey: Redacted.make(""),
           cloudMintPublicKey: "",

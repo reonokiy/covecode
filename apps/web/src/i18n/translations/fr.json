@@ -4936,6 +4936,9 @@
     },
     ", puis sélectionnez Actualiser."
   ],
+  "edaebeea1915f9c1": "Compte",
+  "a656dc69a38a3639": "Sign out",
+  "daf8daec701f0863": "Compte",
   "cf09d31e268af127": "Réessayer T3 Connect",
   "6fa695d3a822bb9e": "Se connecter à T3 Connect",
   "b28a147f66b0e088": "Date d’association indisponible",
@@ -4991,13 +4994,6 @@
   "ce6b7e994161e68f": "Ajouter une route",
   "d3ef4f9486e31279": "Ajouter",
   "c246e33dafd359cc": "Ajouter",
-  "b0c1beb79a87d97b": "Demande d’autorisation",
-  "0311d7ed2b7eb2f6": "Ce lien de connexion est incomplet",
-  "09e69d04f7e588eb": "Il manque la demande d’autorisation dans le lien. Relancez `t3 connect` dans votre terminal et ouvrez l’URL qui vient d’être affichée.",
-  "55ee748307f0cd6a": "Autorisation dans le navigateur",
-  "1ccae6b48df9cf15": "Connexion de votre terminal",
-  "b3e7da67bc047933": "Redirection pour autoriser T3 Connect pour votre CLI…",
-  "bb4cbcc32d3caec8": "Connectez-vous pour continuer à autoriser T3 Connect pour votre CLI.",
   "b6cc9af7a6d5e31b": "Publier",
   "a624f5a1c3936a6b": "Connecter des appareils",
   "2e7604ad4afe0231": "T3 Connect activé",
@@ -7689,15 +7685,15 @@
   "e1fcc4b74faaae02": "Supprimer le raccourci…",
   "efa55bbb1d3aa45e": "Vérifier les modifications",
   "3e02b74615e20d82": "Configuration manuelle",
-  "99950f160873dfdf": [
-    "Désactivez la capture dans Cove Code pour l’arrêter. Supprimez le raccourci de ",
+  "84a8564b355b66bd": [
+    "Turn capture off in Cove Code to stop it. Remove the shortcut from",
+    " ",
     {
       "i": 1,
       "k": "_gt_value_1",
       "v": "v"
     },
-    " ",
-    "pour libérer les touches."
+    " to free up the keys."
   ],
   "4bf700ad94c0c486": "J’ai ajouté le raccourci",
   "bcdea6ebe1a65e63": "Compte ChatGPT à connecter",
@@ -8954,7 +8950,6 @@
   "39a7578443219b8f": "La connexion au fournisseur a échoué. Réessayez.",
   "179d3c67e76bb669": "Ce lien de connexion n’est pas une adresse web, il n’a donc pas été ouvert.",
   "d80e10905a0fb8fb": "Impossible d’ouvrir la page de connexion. Copiez le lien et ouvrez-le dans votre navigateur.",
-  "edaebeea1915f9c1": "Compte",
   "249cfb7532e0b380": "Méthode de connexion",
   "8e184b3520eac9bc": "Valeur par défaut du fournisseur",
   "1dea42922c13841d": "Copier le lien de connexion",
@@ -9630,7 +9625,6 @@
     },
     " peuvent y lire des valeurs par nom. Les valeurs sont lues avec la CLI op sur ce serveur au démarrage d’un fournisseur."
   ],
-  "daf8daec701f0863": "Compte",
   "c3d6c8494c7d4b8f": "Le raccourci du compte, l’adresse de connexion sans https://, ou l’ID affiché par op account list.",
   "afa8b4a2e025dd36": "Valeur",
   "13f8f1e086293635": "Source de {label}",

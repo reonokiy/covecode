@@ -1,4 +1,3 @@
-import { useClerk } from "@clerk/react";
 import {
   createCloudAccountService,
   ManagedRelay,
@@ -16,7 +15,7 @@ import { useEffect, type ReactNode } from "react";
 import { environmentCatalog } from "../connection/catalog";
 import { runtime } from "../lib/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { resolveRelayClerkTokenOptions } from "./publicConfig";
+import { startCloudAuth } from "./oidcAuth";
 
 export function deactivateManagedRelayAuthentication(): void {
   setManagedRelaySession(appAtomRegistry, null);
@@ -32,12 +31,7 @@ export function activateManagedRelayAuthentication(
   });
 }
 
-type ClerkInstance = ReturnType<typeof useClerk>;
-
-function clerkTokenReader(clerk: ClerkInstance): () => Promise<string | null> {
-  return async () =>
-    clerk.session ? await clerk.session.getToken(resolveRelayClerkTokenOptions()) : null;
-}
+type CloudSession = NonNullable<Awaited<ReturnType<typeof startCloudAuth>>>;
 
 // A failed route removal fails the switch, so the next account never activates over the old routes.
 async function cleanUpManagedRelayAccount(): Promise<void> {
@@ -56,19 +50,27 @@ async function cleanUpManagedRelayAccount(): Promise<void> {
   if (removal._tag !== "Success") throw squashAtomCommandFailure(removal);
 }
 
-const managedRelayAccountService = createCloudAccountService<ClerkInstance>({
+const managedRelayAccountService = createCloudAccountService<CloudSession>({
   deactivate: deactivateManagedRelayAuthentication,
   detach: deactivateManagedRelayAuthentication,
   cleanUp: cleanUpManagedRelayAccount,
   activate: ({ source, accountId }) =>
-    activateManagedRelayAuthentication(accountId, clerkTokenReader(source)),
+    activateManagedRelayAuthentication(accountId, source.getToken),
 });
 
 export function ManagedRelayAuthProvider({ children }: { readonly children: ReactNode }) {
-  // ClerkProvider creates the Clerk instance and owns its lifetime, so the
-  // account service observes it for as long as this provider is mounted.
-  const clerk = useClerk();
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- attaches the Clerk instance to the managed relay account service for the provider's lifetime
-  useEffect(() => managedRelayAccountService.attach(clerk), [clerk]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- attaches the OIDC session to the managed relay account service for the provider's lifetime
+  useEffect(() => {
+    let detach: (() => void) | null = null;
+    let cancelled = false;
+    void startCloudAuth().then((session) => {
+      if (session === null || cancelled) return;
+      detach = managedRelayAccountService.attach(session);
+    });
+    return () => {
+      cancelled = true;
+      detach?.();
+    };
+  }, []);
   return children;
 }

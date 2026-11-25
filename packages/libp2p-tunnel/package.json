@@ -1,0 +1,35 @@
+{
+  "name": "@t3tools/libp2p-tunnel",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "catalog:",
+    "@chainsafe/libp2p-yamux": "catalog:",
+    "@libp2p/circuit-relay-v2": "catalog:",
+    "@libp2p/crypto": "catalog:",
+    "@libp2p/dcutr": "catalog:",
+    "@libp2p/identify": "catalog:",
+    "@libp2p/interface": "catalog:",
+    "@libp2p/peer-id": "catalog:",
+    "@libp2p/tcp": "catalog:",
+    "@libp2p/websockets": "catalog:",
+    "@multiformats/multiaddr": "catalog:",
+    "libp2p": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/ws": "catalog:",
+    "vite-plus": "catalog:",
+    "ws": "catalog:"
+  }
+}

@@ -4935,6 +4935,9 @@
     },
     " e selecione Atualizar."
   ],
+  "edaebeea1915f9c1": "Conta",
+  "a656dc69a38a3639": "Sign out",
+  "daf8daec701f0863": "Conta",
   "cf09d31e268af127": "Tentar o T3 Connect novamente",
   "6fa695d3a822bb9e": "Entrar no T3 Connect",
   "b28a147f66b0e088": "Data do vínculo indisponível",
@@ -4990,13 +4993,6 @@
   "ce6b7e994161e68f": "Adicionar rota",
   "d3ef4f9486e31279": "Adicionar",
   "c246e33dafd359cc": "Adicionar",
-  "b0c1beb79a87d97b": "Pedido de autorização",
-  "0311d7ed2b7eb2f6": "Este link de conexão está incompleto",
-  "09e69d04f7e588eb": "Falta o pedido de autorização no link. Execute `t3 connect` de novo no terminal e abra a URL recém-exibida.",
-  "55ee748307f0cd6a": "Autorização pelo navegador",
-  "1ccae6b48df9cf15": "Conectando seu terminal",
-  "b3e7da67bc047933": "Redirecionando para autorizar o T3 Connect no seu CLI…",
-  "bb4cbcc32d3caec8": "Entre para continuar autorizando o T3 Connect no seu CLI.",
   "b6cc9af7a6d5e31b": "Publicar",
   "a624f5a1c3936a6b": "Conectar dispositivos",
   "2e7604ad4afe0231": "T3 Connect ativado",
@@ -7688,15 +7684,15 @@
   "e1fcc4b74faaae02": "Remover atalho…",
   "efa55bbb1d3aa45e": "Revisar alterações",
   "3e02b74615e20d82": "Configuração manual",
-  "99950f160873dfdf": [
-    "Desative a captura no Cove Code para pará-la. Remova o atalho de ",
+  "84a8564b355b66bd": [
+    "Turn capture off in Cove Code to stop it. Remove the shortcut from",
+    " ",
     {
       "i": 1,
       "k": "_gt_value_1",
       "v": "v"
     },
-    " ",
-    "para liberar as teclas."
+    " to free up the keys."
   ],
   "4bf700ad94c0c486": "Já adicionei o atalho",
   "bcdea6ebe1a65e63": "Conta do ChatGPT a conectar",
@@ -8953,7 +8949,6 @@
   "39a7578443219b8f": "O login no provedor falhou. Tente novamente.",
   "179d3c67e76bb669": "Este link de login não é um endereço web, então não foi aberto.",
   "d80e10905a0fb8fb": "Não foi possível abrir a página de login. Copie o link e abra-o no navegador.",
-  "edaebeea1915f9c1": "Conta",
   "249cfb7532e0b380": "Método de login",
   "8e184b3520eac9bc": "Padrão do provedor",
   "1dea42922c13841d": "Copiar link de login",
@@ -9629,7 +9624,6 @@
     },
     " podem ler valores dele pelo nome. Os valores são lidos com o CLI op nesse servidor quando um provedor inicia."
   ],
-  "daf8daec701f0863": "Conta",
   "c3d6c8494c7d4b8f": "O atalho da conta, o endereço de login sem https:// ou o ID que op account list mostra.",
   "afa8b4a2e025dd36": "Valor",
   "13f8f1e086293635": "Origem de {label}",

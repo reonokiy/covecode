@@ -47,7 +47,7 @@ const proofRequest: RelayLinkProofRequest = {
   challenge: "test-challenge",
   relayIssuer: "https://relay.example.test",
   endpoint: {
-    providerKind: "cloudflare_tunnel",
+    providerKind: "libp2p_tunnel",
     httpBaseUrl: "https://environment.example.test",
     wsBaseUrl: "wss://environment.example.test",
   },

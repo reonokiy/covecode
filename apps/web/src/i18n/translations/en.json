@@ -4937,6 +4937,9 @@
     },
     ", then select Refresh."
   ],
+  "edaebeea1915f9c1": "Account",
+  "a656dc69a38a3639": "Sign out",
+  "daf8daec701f0863": "Account",
   "cf09d31e268af127": "Retry T3 Connect",
   "6fa695d3a822bb9e": "Sign in to T3 Connect",
   "b28a147f66b0e088": "Link date unavailable",
@@ -4992,13 +4995,6 @@
   "ce6b7e994161e68f": "Add route",
   "d3ef4f9486e31279": "Add",
   "c246e33dafd359cc": "Add",
-  "b0c1beb79a87d97b": "Authorization request",
-  "0311d7ed2b7eb2f6": "This connect link is incomplete",
-  "09e69d04f7e588eb": "The link is missing its authorization request. Re-run `t3 connect` in your terminal and open the freshly printed URL.",
-  "55ee748307f0cd6a": "Browser authorization",
-  "1ccae6b48df9cf15": "Connecting your terminal",
-  "b3e7da67bc047933": "Redirecting to authorize T3 Connect for your CLI…",
-  "bb4cbcc32d3caec8": "Sign in to continue authorizing T3 Connect for your CLI.",
   "b6cc9af7a6d5e31b": "Publish",
   "a624f5a1c3936a6b": "Connect devices",
   "2e7604ad4afe0231": "T3 Connect enabled",
@@ -7696,15 +7692,15 @@
   "e1fcc4b74faaae02": "Remove shortcut…",
   "efa55bbb1d3aa45e": "Review changes",
   "3e02b74615e20d82": "Manual setup",
-  "99950f160873dfdf": [
-    "Turn capture off in Cove Code to stop it. Remove the shortcut from ",
+  "84a8564b355b66bd": [
+    "Turn capture off in Cove Code to stop it. Remove the shortcut from",
+    " ",
     {
       "i": 1,
       "k": "_gt_value_1",
       "v": "v"
     },
-    " ",
-    "to free up the keys."
+    " to free up the keys."
   ],
   "4bf700ad94c0c486": "I've added the shortcut",
   "bcdea6ebe1a65e63": "ChatGPT account to connect",
@@ -8962,7 +8958,6 @@
   "39a7578443219b8f": "Provider sign-in failed. Try again.",
   "179d3c67e76bb669": "This sign-in link is not a web address, so it was not opened.",
   "d80e10905a0fb8fb": "Could not open the sign-in page. Copy the link and open it in your browser.",
-  "edaebeea1915f9c1": "Account",
   "249cfb7532e0b380": "Sign-in method",
   "8e184b3520eac9bc": "Provider default",
   "1dea42922c13841d": "Copy sign-in link",
@@ -9640,7 +9635,6 @@
     },
     " can read values from it by name. Values are read with the op CLI on that server when a provider starts."
   ],
-  "daf8daec701f0863": "Account",
   "c3d6c8494c7d4b8f": "The account shorthand, sign-in address without https://, or ID that op account list shows.",
   "afa8b4a2e025dd36": "Value",
   "13f8f1e086293635": "{label} source",

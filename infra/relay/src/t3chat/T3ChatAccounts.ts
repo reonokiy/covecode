@@ -1,4 +1,3 @@
-import { createClerkClient } from "@clerk/backend";
 import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 import * as Context from "effect/Context";
@@ -31,12 +30,12 @@ export class T3ChatNotConfigured extends Schema.TaggedError<T3ChatNotConfigured>
   }
 }
 
-export class ClerkUserLookupFailed extends Schema.TaggedError<ClerkUserLookupFailed>()(
-  "ClerkUserLookupFailed",
-  { cause: Schema.Defect() },
+export class T3ChatEmailMissing extends Schema.TaggedError<T3ChatEmailMissing>()(
+  "T3ChatEmailMissing",
+  {},
 ) {
   override get message(): string {
-    return "Could not read the Clerk user's primary email";
+    return "Verified OIDC session has no email claim for T3 Chat linking";
   }
 }
 
@@ -62,7 +61,8 @@ export class T3ChatAccounts extends Context.Service<
     readonly available: boolean;
     readonly createLinkUrl: (input: {
       readonly userId: string;
-    }) => Effect.Effect<string, T3ChatNotConfigured | ClerkUserLookupFailed>;
+      readonly email?: string | undefined;
+    }) => Effect.Effect<string, T3ChatNotConfigured | T3ChatEmailMissing>;
     readonly getLink: (input: {
       readonly userId: string;
     }) => Effect.Effect<RelayT3ChatLink | null, T3ChatNotConfigured | T3ChatRequestFailed>;
@@ -95,7 +95,6 @@ export const make = Effect.gen(function* () {
     ? Effect.succeed(settings)
     : Effect.fail(new T3ChatNotConfigured());
 
-  // The timeout covers the body read so a stalled response still fails fast.
   const post = Effect.fn("relay.t3chat.post")(function* (
     operation: T3ChatRequestFailed["operation"],
     path: string,
@@ -104,7 +103,7 @@ export const make = Effect.gen(function* () {
     const { baseUrl, linkSecret } = yield* requireSettings;
     return yield* HttpClientRequest.post(new URL(path, baseUrl).toString()).pipe(
       HttpClientRequest.bearerToken(Redacted.value(linkSecret)),
-      HttpClientRequest.bodyJsonUnsafe({ clerkUserId: userId }),
+      HttpClientRequest.bodyJsonUnsafe({ userId }),
       client.execute,
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap((response) => response.json),
@@ -113,37 +112,17 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const lookupClerkPrimaryEmail = Effect.fn("relay.t3chat.lookup_clerk_primary_email")(function* (
-    userId: string,
-  ) {
-    return yield* Effect.tryPromise({
-      try: async () => {
-        const user = await createClerkClient({
-          secretKey: Redacted.value(config.clerkSecretKey),
-          publishableKey: config.clerkPublishableKey,
-        }).users.getUser(userId);
-        const email = user.primaryEmailAddress?.emailAddress;
-        if (!email) throw new Error("Clerk user has no primary email address.");
-        return email;
-      },
-      catch: (cause) => new ClerkUserLookupFailed({ cause }),
-    }).pipe(
-      Effect.timeoutOrElse({
-        duration: T3CHAT_REQUEST_TIMEOUT,
-        orElse: () => Effect.fail(new ClerkUserLookupFailed({ cause: "timed out" })),
-      }),
-    );
-  });
-
   return T3ChatAccounts.of({
     available: settings !== undefined,
     createLinkUrl: Effect.fn("relay.t3chat.create_link_url")(function* (input) {
       const { baseUrl, linkSecret } = yield* requireSettings;
-      const email = yield* lookupClerkPrimaryEmail(input.userId);
+      if (!input.email) {
+        return yield* new T3ChatEmailMissing();
+      }
       const now = yield* DateTime.now;
       const token = signLinkToken(Redacted.value(linkSecret), {
         sub: input.userId,
-        email,
+        email: input.email,
         exp: Math.floor(now.epochMilliseconds / 1_000) + LINK_TOKEN_TTL_SECONDS,
       });
       const url = new URL("/link/t3code", baseUrl);

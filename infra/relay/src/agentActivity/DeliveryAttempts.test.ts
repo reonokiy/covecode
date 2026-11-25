@@ -1,9 +1,9 @@
 import * as NodeCryptoLayer from "@effect/platform-node/NodeCrypto";
+import * as PgClient from "@effect/sql-pg/PgClient";
+import * as PgDrizzle from "drizzle-orm/effect-postgres";
 import { describe, expect, it } from "@effect/vitest";
-import * as Drizzle from "@alchemy.run/drizzle/Postgres";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Redacted from "effect/Redacted";
 
 import * as RelayDb from "../db.ts";
 import * as DeliveryAttempts from "./DeliveryAttempts.ts";
@@ -214,27 +214,43 @@ describe("DeliveryAttempts", () => {
     });
   });
 
-  // The Worker's db is Alchemy's proxyChain, whose builders render as nothing inside another
-  // query. Nothing listens on the port; the failed query still reports the SQL it sent.
-  it.live("prunes with a subquery the Worker's proxied database can render", () =>
+  it.effect("prunes with a subquery compatible with Drizzle effect-postgres", () =>
     Effect.gen(function* () {
-      const db = yield* Drizzle.Postgres(
-        Effect.succeed(Redacted.make("postgres://relay:relay@127.0.0.1:1/relay")),
-        { client: { prepare: false } },
+      const capturedQueries: Array<string> = [];
+      const shim = {
+        unsafe: (query: string) => {
+          capturedQueries.push(query);
+          const rows = Effect.succeed([]);
+          return Object.assign(rows, {
+            values: rows,
+            withoutTransform: rows,
+            raw: rows,
+          });
+        },
+        withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
+      } as unknown as PgClient.PgClient;
+
+      const db = yield* PgDrizzle.makeWithDefaults().pipe(
+        Effect.provideService(PgClient.PgClient, shim),
       );
-      const error = yield* DeliveryAttempts.DeliveryAttempts.pipe(
+      const deleted = yield* DeliveryAttempts.DeliveryAttempts.pipe(
         Effect.flatMap((attempts) => attempts.pruneExpired),
         Effect.provide(
           DeliveryAttempts.layer.pipe(
             Layer.provide(NodeCryptoLayer.layer),
-            Layer.provide(Layer.succeed(RelayDb.RelayDb, db)),
+            Layer.provide(
+              Layer.succeed(
+                RelayDb.RelayDb,
+                RelayDb.RelayDb.of(db as unknown as RelayDb.RelayDb["Service"]),
+              ),
+            ),
           ),
         ),
-        Effect.flip,
       );
-      expect((error.cause as { readonly query: string }).query).toMatch(
+      expect(deleted).toBe(0);
+      expect(capturedQueries[0]).toMatch(
         /"relay_delivery_attempts"\."id" in \(select "id" from "relay_delivery_attempts" where "relay_delivery_attempts"\."created_at" < \$1 limit \$2\)/,
       );
-    }).pipe(Effect.scoped),
+    }),
   );
 });

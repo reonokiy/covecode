@@ -183,7 +183,6 @@ import * as ConnectReachability from "./cloud/ConnectReachability.ts";
 import { pendingServiceUpdateExists } from "./cloud/updateHandoff.ts";
 import * as RelayTracing from "./cloud/relayTracing.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
-import * as RelayClientLedger from "./cloud/RelayClientLedger.ts";
 import {
   MANAGED_TUNNEL_FIRST_REGISTRATION_JITTER,
   makeManagedTunnelRecovery,
@@ -331,11 +330,10 @@ const layerResourceDiagnostics = Layer.mergeAll(
 
 const layerRelayClient = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
     const policy = yield* ManagedPolicy.ManagedPolicy;
-    const layerCloudflared = RelayClient.layerCloudflared({ baseDir: config.baseDir });
-    if (ManagedLimits.allowsConnect(policy)) return layerCloudflared;
-    // The connector only carries T3 Connect, so a policy without Connect never installs one.
+    const layerBuiltin = RelayClient.layerBuiltinLibp2p;
+    if (ManagedLimits.allowsConnect(policy)) return layerBuiltin;
+    // The connector only carries T3 Connect, so a policy without Connect never enables one.
     const refused = Effect.fn("RelayClient.installRefusedByPolicy")(function* () {
       return yield* new RelayClient.RelayClientInstallError({
         reason: "managed_by_policy",
@@ -352,7 +350,7 @@ const layerRelayClient = Layer.unwrap(
           installWithProgress: refused,
         });
       }),
-    ).pipe(Layer.provide(layerCloudflared));
+    ).pipe(Layer.provide(layerBuiltin));
   }),
 ).pipe(Layer.provide(ManagedPolicy.layer));
 
@@ -574,18 +572,7 @@ const layerAuth = EnvironmentAuth.layer.pipe(
 
 const layerCloudManagedEndpointRuntime = Layer.mergeAll(
   layerRelayClient,
-  CloudManagedEndpointRuntime.layer.pipe(
-    Layer.provide(ServerSecretStore.layer),
-    Layer.provide(layerRelayClient),
-    Layer.provide(
-      Layer.unwrap(
-        Effect.gen(function* () {
-          const config = yield* ServerConfig.ServerConfig;
-          return RelayClientLedger.layer({ stateDir: config.stateDir });
-        }),
-      ),
-    ),
-  ),
+  CloudManagedEndpointRuntime.layer.pipe(Layer.provide(ServerSecretStore.layer)),
 );
 
 const layerScheduledTaskWebhookOrigin = Layer.effect(
@@ -1159,6 +1146,10 @@ const layerMakeServer = Layer.unwrap(
             if (typeof address === "string" || !("port" in address)) return;
             const localOrigin = `http://${loopbackUrlHostForAddress(address)}:${address.port}`;
             const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
+            yield* endpointRuntime.setLocalOrigin({
+              localHttpHost: loopbackUrlHostForAddress(address),
+              localHttpPort: address.port,
+            });
             const runManagedTunnelRecovery = yield* makeManagedTunnelRecovery({
               recover: (config: RelayManagedEndpointRuntimeConfig) =>
                 cloudLink.recoverManagedTunnel(localOrigin, config, {

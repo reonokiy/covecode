@@ -10,21 +10,24 @@ export interface EndpointFailureDiagnosis {
 }
 
 /**
- * Cloudflare answers a Worker subrequest it cannot route with a plain-text body
- * such as `error code: 1033`. 1033 means no cloudflared connector is running for
- * the tunnel; 1016 means the origin hostname did not resolve.
+ * Classifies HTTP error responses returned by the libp2p tunnel gateway or reverse proxy.
  */
 export function classifyEndpointResponse(
   status: number,
   body: string,
 ): RelayEnvironmentEndpointFailure {
-  const cloudflareCode = /error code:\s*(\d{4})/i.exec(body)?.[1];
-  if (cloudflareCode === "1016") return "dns";
-  if (cloudflareCode === "1033") return "tunnel_down";
+  if (body.includes('"tunnel_unavailable"') || body.includes('"libp2p_disabled"')) {
+    return "tunnel_down";
+  }
+  if (body.includes('"tunnel_upstream_failed"')) {
+    return "origin_unreachable";
+  }
+  if (status === 530 && body.includes("1016")) {
+    return "dns";
+  }
   switch (status) {
     case 530:
-      return cloudflareCode === undefined ? "tunnel_down" : "unknown";
-    // cloudflared answers 502 when nothing listens on the local origin port.
+      return "tunnel_down";
     case 502:
     case 503:
       return "origin_unreachable";
@@ -38,7 +41,6 @@ export function classifyEndpointResponse(
     case 526:
       return "tls";
     default:
-      // Any other status came from T3 Code itself, in a shape we did not expect.
       return "invalid_response";
   }
 }
@@ -75,9 +77,8 @@ export const diagnoseEndpointFailure = Effect.fnUntraced(function* (cause: unkno
           : "unknown",
     } satisfies EndpointFailureDiagnosis;
   }
-  // Only Cloudflare's 530 needs the body to tell a dead tunnel from a DNS error.
   const body =
-    response.status === 530
+    response.status === 502 || response.status === 530
       ? Option.getOrElse(
           yield* response.text.pipe(
             Effect.timeoutOption(ERROR_BODY_READ_TIMEOUT),

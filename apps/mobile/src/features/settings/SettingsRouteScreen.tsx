@@ -14,7 +14,7 @@ import { useSelectWorkspaceTab } from "../layout/workspace/useSelectWorkspaceTab
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { useAuth, useUser } from "@clerk/expo";
+import { useMobileCloudAuth } from "../cloud/useMobileCloudAuth";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { use, type ComponentProps } from "react";
 import { Platform, View } from "react-native";
@@ -112,14 +112,13 @@ interface SettingsListSection {
 function ConfiguredSettingsRouteScreen() {
   const gt = useGT();
   const navigation = useNavigation();
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { user } = useUser();
+  const { isLoaded, isSignedIn, user } = useMobileCloudAuth();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const accountLabel = !isLoaded
     ? gt("Checking")
     : !isSignedIn
       ? gt("Sign in")
-      : (user?.primaryEmailAddress?.emailAddress ?? gt("Signed in"));
+      : (user?.email ?? gt("Signed in"));
 
   return (
     <SettingsList

@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - reads the user guide to check its anchors.
 import * as NodeFS from "node:fs";
-import * as NodeNet from "node:net";
 
 import { T3_CONNECT_TROUBLESHOOTING_SECTIONS } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -15,24 +14,31 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
-import { vi } from "vite-plus/test";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { CLOUD_ENDPOINT_RUNTIME_CONFIG, RELAY_URL_SECRET } from "./config.ts";
 import * as ConnectReachability from "./ConnectReachability.ts";
 import { classifyReachability, type ReachabilityFacts } from "./ConnectReachability.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 
-vi.mock("node:net", { spy: true });
-
 const checkedAt = "2026-10-19T00:00:00.000Z";
-const connected = {
+const connected: ManagedEndpointRuntime.ConnectorFacts = {
   pid: 1,
-  readyConnections: 4,
-  hostname: "env.example.test",
-  origin: null,
-  protocol: "quic",
+  readyConnections: 1,
+  hostname: "relay.example.test",
+  origin: "http://127.0.0.1:3773",
+  protocol: "libp2p",
+  publicHttpBaseUrl: "https://relay.example.test/t/0123456789abcdef/",
+  peerId: "12D3KooWEnvPeer",
 };
-const notConnected = { pid: 1, readyConnections: 0, hostname: null, origin: null, protocol: null };
+const notConnected: ManagedEndpointRuntime.ConnectorFacts = {
+  pid: 1,
+  readyConnections: 0,
+  hostname: null,
+  origin: null,
+  protocol: "libp2p",
+  publicHttpBaseUrl: null,
+};
 const facts = (overrides: Partial<ReachabilityFacts>): ReachabilityFacts => ({
   managedTunnelConfigured: true,
   connector: connected,
@@ -45,10 +51,15 @@ const facts = (overrides: Partial<ReachabilityFacts>): ReachabilityFacts => ({
 describe("classifyReachability", () => {
   it.each([
     [{ kind: "status", status: 502 }, "origin_unreachable"],
-    [{ kind: "status", status: 530 }, "no_connector"],
-    [{ kind: "status", status: 530, cloudflareError: "1033" }, "no_connector"],
-    [{ kind: "status", status: 530, cloudflareError: "1016" }, "dns_failed"],
-    [{ kind: "status", status: 530, cloudflareError: "1001" }, "unexpected_response"],
+    [
+      { kind: "status", status: 502, relayErrorCode: "tunnel_upstream_failed" },
+      "origin_unreachable",
+    ],
+    [{ kind: "status", status: 502, relayErrorCode: "tunnel_unavailable" }, "no_connector"],
+    [{ kind: "status", status: 502, relayErrorCode: "libp2p_disabled" }, "no_connector"],
+    [{ kind: "status", status: 503, relayErrorCode: "tunnel_unavailable" }, "no_connector"],
+    [{ kind: "status", status: 500 }, "unexpected_response"],
+    [{ kind: "dns_failed" }, "dns_failed"],
     [{ kind: "network_error" }, "timeout"],
   ] as const)("maps endpoint result %o to %s", (endpoint, cause) => {
     expect(classifyReachability(facts({ endpoint, edgeReachable: true }), checkedAt)).toMatchObject(
@@ -56,8 +67,20 @@ describe("classifyReachability", () => {
     );
   });
 
-  it("keeps the endpoint cause when the TCP edge test cannot explain it", () => {
-    // QUIC (UDP) can connect while TCP 7844 is blocked.
+  it("reports edge_unreachable when control plane /health fails and connector is not ready", () => {
+    expect(
+      classifyReachability(
+        facts({
+          connector: notConnected,
+          endpoint: { kind: "timeout" },
+          edgeReachable: false,
+        }),
+        checkedAt,
+      ),
+    ).toMatchObject({ status: "unreachable", cause: "edge_unreachable" });
+  });
+
+  it("keeps the endpoint cause when the connector is connected", () => {
     expect(
       classifyReachability(
         facts({ endpoint: { kind: "status", status: 502 }, edgeReachable: false }),
@@ -70,26 +93,9 @@ describe("classifyReachability", () => {
           connector: {
             pid: 1,
             readyConnections: null,
-            hostname: "env.example.test",
+            hostname: "relay.example.test",
             origin: null,
-            protocol: null,
-          },
-          endpoint: { kind: "status", status: 502 },
-          edgeReachable: false,
-        }),
-        checkedAt,
-      ),
-    ).toMatchObject({ cause: "origin_unreachable" });
-    // Failed DNS also fails the edge lookups.
-    expect(
-      classifyReachability(
-        facts({
-          connector: {
-            pid: 1,
-            readyConnections: null,
-            hostname: "env.example.test",
-            origin: null,
-            protocol: null,
+            protocol: "libp2p",
           },
           endpoint: { kind: "dns_failed" },
           edgeReachable: false,
@@ -99,14 +105,13 @@ describe("classifyReachability", () => {
     ).toMatchObject({ cause: "dns_failed" });
   });
 
-  it("waits on a connector that has not connected while the edge answers", () => {
+  it("waits on a connector that has not connected while the relay answers", () => {
     expect(
       classifyReachability(facts({ connector: notConnected, edgeReachable: true }), checkedAt),
     ).toMatchObject({ cause: "connector_not_ready" });
   });
 
   it("does not point an unlinked server at a background service it may not have", () => {
-    // Desktop and `t3 serve` run the server without a background service.
     const result = classifyReachability(facts({ managedTunnelConfigured: false }), checkedAt);
     expect(result).toMatchObject({ cause: "not_linked" });
     expect(result.status === "unreachable" && result.fix).not.toContain("t3 service");
@@ -115,16 +120,12 @@ describe("classifyReachability", () => {
 
 interface ServedResponse {
   readonly status: number;
-  readonly body: string | ReadableStream<Uint8Array> | { readonly cloudflareError: number };
+  readonly body: string | ReadableStream<Uint8Array>;
 }
 
-// What Cloudflare serves for its 530 page: HTML unless the client accepts JSON.
-const cloudflareErrorPage = (request: HttpClientRequest.HttpClientRequest, code: number) =>
-  request.headers.accept === "application/json"
-    ? JSON.stringify({ status: 530, error_code: code, error_name: "tunnel_error" })
-    : `<!doctype html><h1><span>Error</span> <span>${code}</span></h1>`;
-
 type Served = Effect.Effect<ServedResponse, HttpClientError.HttpClientError>;
+
+const encode = (value: string) => new TextEncoder().encode(value);
 
 const reachabilityLayer = (
   respond: Served | ((request: HttpClientRequest.HttpClientRequest) => Served),
@@ -139,25 +140,30 @@ const reachabilityLayer = (
           restartConnector,
         }),
         Layer.mock(ServerSecretStore.ServerSecretStore)({
-          get: () => Effect.succeedSome(new Uint8Array()),
+          get: (name) => {
+            if (name === CLOUD_ENDPOINT_RUNTIME_CONFIG) {
+              return Effect.succeedSome(encode("{}"));
+            }
+            if (name === RELAY_URL_SECRET) {
+              return Effect.succeedSome(encode("https://relay.example.test"));
+            }
+            return Effect.succeedNone;
+          },
         }),
         Layer.succeed(
           HttpClient.HttpClient,
-          HttpClient.make((request) =>
-            (Effect.isEffect(respond) ? respond : respond(request)).pipe(
+          HttpClient.make((request) => {
+            if (request.url.endsWith("/health")) {
+              return Effect.succeed(
+                HttpClientResponse.fromWeb(request, Response.json({ ok: true })),
+              );
+            }
+            return (Effect.isEffect(respond) ? respond : respond(request)).pipe(
               Effect.map(({ status, body }) =>
-                HttpClientResponse.fromWeb(
-                  request,
-                  new Response(
-                    typeof body === "object" && "cloudflareError" in body
-                      ? cloudflareErrorPage(request, body.cloudflareError)
-                      : body,
-                    { status },
-                  ),
-                ),
+                HttpClientResponse.fromWeb(request, new Response(body, { status })),
               ),
-            ),
-          ),
+            );
+          }),
         ),
         Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
@@ -167,54 +173,45 @@ const reachabilityLayer = (
     ),
   );
 
-const mockEdgeConnect = () =>
-  vi.spyOn(NodeNet, "connect").mockImplementation(() => {
-    const socket = new NodeNet.Socket();
-    queueMicrotask(() => socket.emit("connect"));
-    return socket;
-  });
-
 describe("ConnectReachability stale connector recovery", () => {
-  it.effect("restarts cloudflared when Cloudflare has no connector but it reports ready", () =>
+  it.effect("restarts the connector when the relay has no tunnel while it reports ready", () =>
     Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
       const restarts = yield* Queue.unbounded<number>();
-      // Cloudflare answers 530 while cloudflared still reports four ready connections.
-      let status = 530;
-      let body = { cloudflareError: 1033 };
+      let status = 502;
+      let errorCode = "tunnel_unavailable";
       const layer = reachabilityLayer(
-        Effect.sync(() => ({ status, body })),
+        Effect.sync(() => ({
+          status,
+          body: JSON.stringify({ error: errorCode }),
+        })),
         (pid, stillDead) =>
           stillDead.pipe(Effect.tap((dead) => (dead ? Queue.offer(restarts, pid) : Effect.void))),
       );
-      // The scheduled checks run in the layer's scope, so the assertions run inside it.
       yield* Effect.gen(function* () {
         const reachability = yield* ConnectReachability.ConnectReachability;
 
-        // The first sighting schedules its own confirming check two minutes later.
         expect(yield* reachability.check).toMatchObject({ cause: "no_connector" });
         yield* TestClock.adjust(Duration.minutes(1));
         expect(yield* Queue.size(restarts)).toBe(0);
         yield* TestClock.adjust(Duration.minutes(1));
         expect(yield* Queue.take(restarts)).toBe(connected.pid);
 
-        // A restart that did not help doubles the wait.
         yield* reachability.check;
         yield* TestClock.adjust(Duration.minutes(2));
         expect(yield* Queue.size(restarts)).toBe(0);
         yield* TestClock.adjust(Duration.minutes(2));
         expect(yield* Queue.take(restarts)).toBe(connected.pid);
 
-        // Reaching the endpoint resets the wait, and a 530 for a broken DNS record is left alone.
+        // Reaching the endpoint resets the wait, and an upstream origin error is not treated as no_connector.
         status = 200;
         expect(yield* reachability.check).toMatchObject({ status: "reachable" });
-        status = 530;
-        body = { cloudflareError: 1016 };
-        expect(yield* reachability.check).toMatchObject({ cause: "dns_failed" });
+        status = 502;
+        errorCode = "tunnel_upstream_failed";
+        expect(yield* reachability.check).toMatchObject({ cause: "origin_unreachable" });
         yield* TestClock.adjust(Duration.minutes(2));
         expect(yield* Queue.size(restarts)).toBe(0);
 
-        body = { cloudflareError: 1033 };
+        errorCode = "tunnel_unavailable";
         yield* reachability.check;
         yield* TestClock.adjust(Duration.minutes(2));
         expect(yield* Queue.take(restarts)).toBe(connected.pid);
@@ -224,11 +221,10 @@ describe("ConnectReachability stale connector recovery", () => {
 
   it.effect("starts a new streak after a healthy check that a newer check overtook", () =>
     Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
       const restartTimes = yield* Queue.unbounded<number>();
       const healthyRequested = yield* Deferred.make<void>();
       const healthyAnswer = yield* Deferred.make<void>();
-      let status = 530;
+      let status = 502;
       const layer = reachabilityLayer(
         Effect.gen(function* () {
           const served = status;
@@ -236,7 +232,10 @@ describe("ConnectReachability stale connector recovery", () => {
             yield* Deferred.succeed(healthyRequested, undefined);
             yield* Deferred.await(healthyAnswer);
           }
-          return { status: served, body: { cloudflareError: 1033 } };
+          return {
+            status: served,
+            body: JSON.stringify({ error: "tunnel_unavailable" }),
+          };
         }),
         (_pid, stillDead) =>
           stillDead.pipe(
@@ -255,16 +254,14 @@ describe("ConnectReachability stale connector recovery", () => {
         yield* reachability.check;
         yield* TestClock.adjust(Duration.minutes(1));
 
-        // The healthy answer arrives after a newer check already reported the tunnel dead.
         status = 200;
         const healthy = yield* Effect.forkChild(reachability.check);
         yield* Deferred.await(healthyRequested);
-        status = 530;
+        status = 502;
         yield* reachability.check;
         yield* Deferred.succeed(healthyAnswer, undefined);
         expect(yield* Fiber.join(healthy)).toMatchObject({ status: "reachable" });
 
-        // The grace period starts again at the next dead check, a minute after the first one.
         yield* reachability.check;
         yield* TestClock.adjust(Duration.minutes(2));
         expect((yield* Queue.take(restartTimes)) - startedAt).toBe(
@@ -276,13 +273,12 @@ describe("ConnectReachability stale connector recovery", () => {
 
   it.effect("rejects a restart when an overtaken healthy check finishes while it waits", () =>
     Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
       const healthyRequested = yield* Deferred.make<void>();
       const healthyAnswer = yield* Deferred.make<void>();
       const restartRequested = yield* Deferred.make<void>();
       const releaseRestart = yield* Deferred.make<void>();
       const guardChecks = yield* Queue.unbounded<boolean>();
-      let status = 530;
+      let status = 502;
       const layer = reachabilityLayer(
         Effect.gen(function* () {
           const served = status;
@@ -290,7 +286,7 @@ describe("ConnectReachability stale connector recovery", () => {
             yield* Deferred.succeed(healthyRequested, undefined);
             yield* Deferred.await(healthyAnswer);
           }
-          return { status: served, body: { cloudflareError: 1033 } };
+          return { status: served, body: JSON.stringify({ error: "tunnel_unavailable" }) };
         }),
         (_pid, stillDead) =>
           Effect.gen(function* () {
@@ -309,7 +305,7 @@ describe("ConnectReachability stale connector recovery", () => {
         status = 200;
         const healthy = yield* Effect.forkChild(reachability.check);
         yield* Deferred.await(healthyRequested);
-        status = 530;
+        status = 502;
         yield* TestClock.adjust(Duration.seconds(1));
         yield* Deferred.await(restartRequested);
 
@@ -327,48 +323,15 @@ describe("ConnectReachability stale connector recovery", () => {
     }),
   );
 
-  it.effect("drops the confirming check of a streak that already ended", () =>
+  it.effect("keeps a 502 whose error body never finishes", () =>
     Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
-      const restarts = yield* Queue.unbounded<number>();
-      let status = 530;
-      let requests = 0;
-      const layer = reachabilityLayer(
-        Effect.sync(() => {
-          requests += 1;
-          return { status, body: { cloudflareError: 1033 } };
-        }),
-        (pid, stillDead) =>
-          stillDead.pipe(Effect.tap((dead) => (dead ? Queue.offer(restarts, pid) : Effect.void))),
-      );
-      yield* Effect.gen(function* () {
-        const reachability = yield* ConnectReachability.ConnectReachability;
-        yield* reachability.check;
-        yield* TestClock.adjust(Duration.minutes(1));
-        status = 200;
-        yield* reachability.check;
-        status = 530;
-        yield* reachability.check;
-
-        const before = requests;
-        yield* TestClock.adjust(Duration.minutes(1));
-        expect(requests).toBe(before);
-        yield* TestClock.adjust(Duration.minutes(1));
-        expect(yield* Queue.take(restarts)).toBe(connected.pid);
-      }).pipe(Effect.provide(layer));
-    }),
-  );
-
-  it.effect("keeps a 530 whose error body never finishes", () =>
-    Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
       let markBodyRead = () => {};
       const bodyRead = new Promise<void>((resolve) => {
         markBodyRead = resolve;
       });
       const layer = reachabilityLayer(
         Effect.sync(() => ({
-          status: 530,
+          status: 502,
           body: new ReadableStream({
             pull: () => {
               markBodyRead();
@@ -383,67 +346,37 @@ describe("ConnectReachability stale connector recovery", () => {
         const check = yield* Effect.forkChild(reachability.check);
         yield* Effect.promise(() => bodyRead);
         yield* TestClock.adjust(Duration.seconds(2));
-        expect(yield* Fiber.join(check)).toMatchObject({ cause: "no_connector" });
+        expect(yield* Fiber.join(check)).toMatchObject({ cause: "origin_unreachable" });
       }).pipe(Effect.provide(layer));
     }),
   );
 });
 
 describe("ConnectReachability DNS failures", () => {
-  // undici wraps getaddrinfo's error in `TypeError: fetch failed`. glibc behind
-  // systemd-resolved can report an NXDOMAIN as EBUSY rather than ENOTFOUND.
   const lookupFailed = (code: string) =>
     Effect.fail(
       new HttpClientError.HttpClientError({
         reason: new HttpClientError.TransportError({
-          request: HttpClientRequest.get("https://env.example.test"),
+          request: HttpClientRequest.get("https://relay.example.test/t/0123456789abcdef/"),
           cause: new TypeError("fetch failed", {
-            cause: Object.assign(new Error(`getaddrinfo ${code} env.example.test`), {
+            cause: Object.assign(new Error(`getaddrinfo ${code} relay.example.test`), {
               code,
               syscall: "getaddrinfo",
-              hostname: "env.example.test",
+              hostname: "relay.example.test",
             }),
           }),
         }),
       }),
     );
 
-  it.effect("reports a getaddrinfo EBUSY as a DNS failure", () =>
+  it.effect("reports getaddrinfo EBUSY/ENOTFOUND/EAI_AGAIN as dns_failed", () =>
     Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
-      const layer = reachabilityLayer(lookupFailed("EBUSY"), () => Effect.succeed(false));
-      const result = yield* ConnectReachability.ConnectReachability.use(
-        (reachability) => reachability.check,
-      ).pipe(Effect.provide(layer));
-      expect(result).toMatchObject({ status: "unreachable", cause: "dns_failed" });
-    }),
-  );
-
-  // A local "not found" cached before the relay published the record looks like a missing
-  // record. Public DNS tells them apart.
-  it.effect("says whether the name exists in public DNS", () =>
-    Effect.gen(function* () {
-      using _connect = mockEdgeConnect();
-      for (const [lookupCode, dnsStatus, reason] of [
-        ["ENOTFOUND", 0, "old cached answer"],
-        ["ENOTFOUND", 3, "missing from public DNS"],
-        // The local resolver did not answer, so nothing it cached is to blame.
-        ["EAI_AGAIN", 0, "does not resolve from this machine"],
-      ] as const) {
-        const layer = reachabilityLayer(
-          (request) =>
-            request.url.startsWith("https://1.1.1.1/dns-query")
-              ? Effect.succeed({ status: 200, body: JSON.stringify({ Status: dnsStatus }) })
-              : lookupFailed(lookupCode),
-          () => Effect.succeed(false),
-        );
+      for (const code of ["EBUSY", "ENOTFOUND", "EAI_AGAIN"]) {
+        const layer = reachabilityLayer(lookupFailed(code), () => Effect.succeed(false));
         const result = yield* ConnectReachability.ConnectReachability.use(
           (reachability) => reachability.check,
         ).pipe(Effect.provide(layer));
-        expect(result).toMatchObject({
-          cause: "dns_failed",
-          reason: expect.stringContaining(reason),
-        });
+        expect(result).toMatchObject({ status: "unreachable", cause: "dns_failed" });
       }
     }),
   );
@@ -455,7 +388,6 @@ describe("T3 Connect troubleshooting links", () => {
       new URL("../../../../docs/user/t3-connect-troubleshooting.md", import.meta.url),
       "utf8",
     );
-    // GitHub's heading anchors: lowercase, drop punctuation, spaces become hyphens.
     const anchors = new Set(
       [...guide.matchAll(/^#{2,3} (.+)$/gm)].map(([, heading]) =>
         heading!

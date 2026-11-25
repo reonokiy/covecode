@@ -1,4 +1,3 @@
-import { createClerkClient, verifyToken } from "@clerk/backend";
 import { sql as drizzleSql } from "drizzle-orm";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Context from "effect/Context";
@@ -77,11 +76,21 @@ import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvide
 import * as ManagedTunnelLimits from "../environments/ManagedTunnelLimits.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
+import * as OidcAuth from "../auth/OidcAuth.ts";
 import * as MobileRegistrations from "../agentActivity/MobileRegistrations.ts";
 import * as T3ChatAccounts from "../t3chat/T3ChatAccounts.ts";
-import { withSpanAttributes } from "../observability.ts";
+import * as Libp2pTunnelRegistry from "../environments/Libp2pTunnelRegistry.ts";
+import {
+  extractEndpointKeyFromPath,
+  extractEndpointKeyFromSubdomainHost,
+} from "../deploymentConfig.ts";
 import { isRelayHookPath, redactRelayHookUrl } from "../hooks/HookForwarder.ts";
 import * as RelayDb from "../db.ts";
+
+const withSpanAttributes =
+  (attributes: Readonly<Record<string, unknown>>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.annotateCurrentSpan(attributes).pipe(Effect.andThen(effect));
 
 // Delegated IDs exceed the router's default 100-character limit; match the environment server.
 export const RELAY_HTTP_ROUTER_CONFIG = {
@@ -97,17 +106,6 @@ const appendRelayCredentialResponseHeaders = HttpEffect.appendPreResponseHandler
       }),
     ),
 );
-
-// T3 Code hosts never retry sooner than Retry-After, so during a Cloudflare
-// rate limit they wait out the pause instead of retrying into it.
-const appendCloudflareRetryAfter = (error: unknown) => {
-  const retryAfterMillis = ManagedEndpointProvider.cloudflareRetryAfterMillis(error);
-  if (retryAfterMillis === undefined) return Effect.void;
-  const seconds = String(Math.max(1, Math.ceil(retryAfterMillis / 1000)));
-  return HttpEffect.appendPreResponseHandler((_request, response) =>
-    Effect.succeed(HttpServerResponse.setHeader(response, "retry-after", seconds)),
-  );
-};
 
 const appendRelayDpopChallengeHeader = HttpEffect.appendPreResponseHandler((_request, response) =>
   Effect.succeed(
@@ -207,21 +205,6 @@ const relayRequestDeadline = <E, R>(
 
 const SENDER_TRACE_HEADER = /^(traceparent|tracestate|b3|x-b3-.*)$/i;
 
-// Where the request entered Cloudflare's network. The Worker runs near its
-// database, not at this edge, so these are the only way to split relay
-// latency by where users are.
-const annotateRelayEdgeLocation = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const cf: unknown = request.source instanceof Request ? Reflect.get(request.source, "cf") : null;
-  if (typeof cf !== "object" || cf === null) return;
-  const attributes: Record<string, string> = {};
-  for (const key of ["colo", "country", "continent"] as const) {
-    const value: unknown = Reflect.get(cf, key);
-    if (typeof value === "string" && value) attributes[`relay.edge.${key}`] = value;
-  }
-  yield* Effect.annotateCurrentSpan(attributes);
-});
-
 // The method-named server span is created below; this wrapper must not add another span.
 const traceRelayHttpRequest = Effect.fnUntraced(function* <E, R>(
   httpEffect: Effect.Effect<
@@ -231,8 +214,7 @@ const traceRelayHttpRequest = Effect.fnUntraced(function* <E, R>(
   >,
 ) {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const traced = annotateRelayEdgeLocation.pipe(
-    Effect.andThen(appendRelayTraceContextResponseHeader),
+  const traced = appendRelayTraceContextResponseHeader.pipe(
     Effect.andThen(relayRequestDeadline(httpEffect)),
   );
   if (!isRelayHookPath(request.url)) {
@@ -254,8 +236,7 @@ const traceRelayHttpRequest = Effect.fnUntraced(function* <E, R>(
     ),
   });
   return yield* HttpMiddleware.tracer(
-    annotateRelayEdgeLocation.pipe(
-      Effect.andThen(appendRelayTraceContextResponseHeader),
+    appendRelayTraceContextResponseHeader.pipe(
       Effect.andThen(
         relayRequestDeadline(
           httpEffect.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request)),
@@ -312,35 +293,33 @@ export const withoutCapturedParentSpan = <A, E, R>(
 export const layerClientAuth = Layer.effect(
   RelayClientAuth,
   Effect.gen(function* () {
-    const config = yield* RelayConfiguration.RelayConfiguration;
+    const oidcAuth = yield* OidcAuth.OidcAuth;
     return {
       clientBearer: Effect.fn("relay.auth.client.bearer")(function* (httpEffect, { credential }) {
         const token = readHttpAuthorizationCredential(credential);
-        const verified = yield* verifyRelayClientBearerToken(config, token).pipe(
+        const verified = yield* oidcAuth.verifyBearerToken(token).pipe(
           Effect.tapError((error) =>
-            Effect.annotateCurrentSpan(
-              "relay.auth.clerk_verification_failure",
-              clerkVerificationFailureReason(error.cause),
-            ),
+            Effect.annotateCurrentSpan("relay.auth.oidc_verification_failure", error.operation),
           ),
           Effect.catch(() => relayAuthInvalidError("invalid_bearer")),
         );
-        if (!verified.sub) {
+        if (!verified.subject) {
           yield* Effect.annotateCurrentSpan({
-            "relay.auth.clerk_verification_failure": "missing_subject",
+            "relay.auth.oidc_verification_failure": "missing_subject",
           });
           return yield* relayAuthInvalidError("invalid_bearer");
         }
         yield* Effect.annotateCurrentSpan({
-          "relay.auth.mode": verified.mode,
-          "relay.auth.subject": verified.sub,
+          "relay.auth.mode": "oidc_bearer",
+          "relay.auth.subject": verified.subject,
         });
 
         return yield* httpEffect.pipe(
-          withSpanAttributes({ "user.id": verified.sub }),
+          withSpanAttributes({ "user.id": verified.subject }),
           Effect.provideService(RelayClientPrincipal, {
-            userId: verified.sub,
+            userId: verified.subject,
             token,
+            ...(verified.email !== undefined ? { email: verified.email } : {}),
           }),
         );
       }),
@@ -429,6 +408,10 @@ export const layerMetadataApi = HttpApiBuilder.group(
   "metadata",
   Effect.fnUntraced(function* (handlers) {
     const settings = yield* RelayConfiguration.RelayConfiguration;
+    const tunnelRegistryOption = yield* Effect.serviceOption(
+      Libp2pTunnelRegistry.Libp2pTunnelRegistry,
+    );
+    const tunnelRegistry = Option.getOrUndefined(tunnelRegistryOption);
     const issuer = normalizeRelayIssuer(settings.relayIssuer);
     const scopes = [
       RelayEnvironmentConnectScope,
@@ -454,7 +437,27 @@ export const layerMetadataApi = HttpApiBuilder.group(
           dpop_bound_access_tokens_required: true,
           dpop_signing_alg_values_supported: ["ES256"],
         }),
-      );
+      )
+      .handle("controlPlaneConfig", () => {
+        const announced = settings.libp2p?.announceMultiaddrs ?? [];
+        const liveAddrs = tunnelRegistry ? tunnelRegistry.getMultiaddrs() : [];
+        return Effect.succeed({
+          controlPlaneUrl: issuer,
+          oidc: settings.oidc
+            ? {
+                issuer: settings.oidc.issuer,
+                clientId: settings.oidc.clientId,
+                audience: settings.oidc.audience ?? null,
+                scopes: [...settings.oidc.scopes],
+              }
+            : null,
+          libp2p: {
+            enabled: Boolean(settings.libp2p?.enabled),
+            peerId: tunnelRegistry?.peerId ?? null,
+            relayMultiaddrs: announced.length > 0 ? [...announced] : [...liveAddrs],
+          },
+        });
+      });
   }),
 );
 
@@ -636,7 +639,7 @@ export const registerEnvironmentTunnelRecovery = Effect.fn(
   if (
     link === null ||
     link.environmentPublicKey !== input.environmentPublicKey ||
-    link.endpoint.providerKind !== "cloudflare_tunnel"
+    link.endpoint.providerKind !== "libp2p_tunnel"
   ) {
     return yield* new HttpApiError.Unauthorized({});
   }
@@ -674,7 +677,7 @@ export const recoverEnvironmentTunnelRecord = Effect.fn(
   if (
     link === null ||
     link.environmentPublicKey !== input.environmentPublicKey ||
-    link.endpoint.providerKind !== "cloudflare_tunnel"
+    link.endpoint.providerKind !== "libp2p_tunnel"
   ) {
     return yield* new HttpApiError.Unauthorized({});
   }
@@ -725,7 +728,7 @@ export const recoverEnvironmentTunnelRecord = Effect.fn(
     const currentLink = target === null ? null : yield* links.getForUser(input);
     if (
       target !== null &&
-      (currentLink === null || currentLink.endpoint.providerKind !== "cloudflare_tunnel")
+      (currentLink === null || currentLink.endpoint.providerKind !== "libp2p_tunnel")
     ) {
       yield* managedEndpointProvider.deprovision({ ...owner, target }).pipe(
         Effect.catch((cause) =>
@@ -815,13 +818,50 @@ export const layerClientApi = HttpApiBuilder.group(
     const devices = yield* Devices.Devices;
     const t3Chat = yield* T3ChatAccounts.T3ChatAccounts;
     const tunnelLimits = yield* ManagedTunnelLimits.ManagedTunnelLimits;
+    const tunnelRegistryOption = yield* Effect.serviceOption(
+      Libp2pTunnelRegistry.Libp2pTunnelRegistry,
+    );
+    const tunnelRegistry = Option.getOrUndefined(tunnelRegistryOption);
     return handlers
       .handle(
         "listEnvironments",
         Effect.fn("relay.api.client.listEnvironments")(function* () {
           const { userId } = yield* RelayClientPrincipal;
           const environments = yield* links.listForUser({ userId });
-          return { environments };
+          if (!tunnelRegistry) {
+            return { environments };
+          }
+          const announced = config.libp2p?.announceMultiaddrs ?? [];
+          const relayMultiaddrs =
+            announced.length > 0 ? [...announced] : [...tunnelRegistry.getMultiaddrs()];
+          return {
+            environments: environments.map((env) => {
+              if (env.endpoint.providerKind !== "libp2p_tunnel") return env;
+              let key: string | null = null;
+              try {
+                const parsed = new URL(env.endpoint.httpBaseUrl);
+                key =
+                  extractEndpointKeyFromPath(parsed.pathname) ??
+                  extractEndpointKeyFromSubdomainHost(
+                    parsed.host,
+                    config.managedEndpointBaseDomain,
+                  );
+              } catch {
+                key = null;
+              }
+              const registration = key ? tunnelRegistry.getEndpointRegistration(key) : null;
+              if (!registration && relayMultiaddrs.length === 0) return env;
+              return {
+                ...env,
+                endpoint: {
+                  ...env.endpoint,
+                  ...(registration ? { libp2pPeerId: registration.peerId } : {}),
+                  ...(relayMultiaddrs.length > 0 ? { libp2pRelayMultiaddrs: relayMultiaddrs } : {}),
+                  ...(config.libp2p?.enabled ? { transportMode: "p2p" as const } : {}),
+                },
+              };
+            }),
+          };
         }, mapRelayCommonApiErrors("not_authorized")),
       )
       .handle(
@@ -866,7 +906,6 @@ export const layerClientApi = HttpApiBuilder.group(
               cloudMintPublicKey: config.cloudMintPublicKey,
             };
           },
-          Effect.tapError(appendCloudflareRetryAfter),
           mapErrorTags({
             EnvironmentLinkProofExpired: (_error, traceId) =>
               new RelayEnvironmentLinkProofExpiredError({
@@ -1009,11 +1048,11 @@ export const layerClientApi = HttpApiBuilder.group(
       .handle(
         "createT3ChatLinkRequest",
         Effect.fn("relay.api.client.createT3ChatLinkRequest")(function* () {
-          const { userId } = yield* RelayClientPrincipal;
-          const url = yield* t3Chat.createLinkUrl({ userId }).pipe(
+          const { userId, email } = yield* RelayClientPrincipal;
+          const url = yield* t3Chat.createLinkUrl({ userId, email }).pipe(
             Effect.catchTags({
               T3ChatNotConfigured: () => relayInternalErrorResponse("internal_error"),
-              ClerkUserLookupFailed: () => relayInternalErrorResponse("upstream_unavailable"),
+              T3ChatEmailMissing: () => relayInternalErrorResponse("upstream_unavailable"),
             }),
           );
           return { url };
@@ -1037,6 +1076,7 @@ export const layerTokenApi = HttpApiBuilder.group(
   "token",
   Effect.fnUntraced(function* (handlers) {
     const config = yield* RelayConfiguration.RelayConfiguration;
+    const oidcAuth = yield* OidcAuth.OidcAuth;
     const random = yield* SecureRandom.SecureRandom;
     const dpopProofs = yield* DpopProofs.DpopProofReplay;
     const relayTokens = yield* RelayTokens.RelayTokens;
@@ -1050,7 +1090,7 @@ export const layerTokenApi = HttpApiBuilder.group(
           scope: args.payload.scope,
         });
         yield* Effect.annotateCurrentSpan({
-          "relay.auth.mode": "clerk_bearer_token_exchange",
+          "relay.auth.mode": "oidc_bearer_token_exchange",
           "relay.oauth.client_id": args.payload.client_id,
           "relay.oauth.scopes": args.payload.scope,
         });
@@ -1058,10 +1098,10 @@ export const layerTokenApi = HttpApiBuilder.group(
           return yield* new HttpApiError.Unauthorized({});
         }
 
-        const verified = yield* verifyClerkBearerToken(config, args.payload.subject_token).pipe(
-          Effect.catch(() => relayAuthInvalidError("invalid_bearer")),
-        );
-        if (!verified.sub || !hasExpectedClerkAudience(verified.aud, config.clerkJwtAudience)) {
+        const verified = yield* oidcAuth
+          .verifyBearerToken(args.payload.subject_token)
+          .pipe(Effect.catch(() => relayAuthInvalidError("invalid_bearer")));
+        if (!verified.subject) {
           return yield* relayAuthInvalidError("invalid_bearer");
         }
         const proofKeyThumbprint = yield* requireDpopProof().pipe(
@@ -1073,7 +1113,7 @@ export const layerTokenApi = HttpApiBuilder.group(
         return {
           access_token: yield* relayTokens
             .issueDpopAccessToken({
-              userId: verified.sub,
+              userId: verified.subject,
               proofKeyThumbprint,
               jti,
               issuedAtEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
@@ -1370,7 +1410,6 @@ export const layerServerApi = HttpApiBuilder.group(
               origin: payload.origin,
             });
           },
-          Effect.tapError(appendCloudflareRetryAfter),
           Effect.catchTags({
             ManagedEndpointOriginNotAllowed: () => Effect.fail(new HttpApiError.Unauthorized({})),
             ManagedEndpointProvisioningNotConfigured: () =>
@@ -1406,7 +1445,6 @@ export const layerServerApi = HttpApiBuilder.group(
               origin: payload.origin,
             });
           },
-          Effect.tapError(appendCloudflareRetryAfter),
           Effect.catchTags({
             ManagedEndpointOriginNotAllowed: () => Effect.fail(new HttpApiError.Unauthorized({})),
             ManagedEndpointProvisioningNotConfigured: () =>
@@ -1462,17 +1500,6 @@ export const layerServerApi = HttpApiBuilder.group(
       );
   }),
 );
-
-class ClerkTokenVerificationFailed extends Schema.TaggedError<ClerkTokenVerificationFailed>()(
-  "ClerkTokenVerificationFailed",
-  {
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return "Clerk token verification failed";
-  }
-}
 
 const isHttpUnauthorized = Schema.is(HttpApiError.Unauthorized);
 const isDpopProofRejected = Schema.is(DpopProofs.DpopProofRejected);
@@ -1657,99 +1684,6 @@ function resolveConnectClientKeyThumbprint(payload: RelayEnvironmentConnectReque
     return null;
   }
   return requestedThumbprint;
-}
-
-function safeAuthFailureReason(value: string): string {
-  return /^[a-z0-9._-]+$/i.test(value) ? value : "unknown";
-}
-
-function clerkVerificationFailureReason(cause: unknown): string {
-  if (
-    cause instanceof Error &&
-    (cause.message.startsWith("Invalid JWT audience claim ") ||
-      cause.message.startsWith("Invalid JWT audience claim array "))
-  ) {
-    return "audience_mismatch";
-  }
-  if (typeof cause === "object" && cause !== null && "reason" in cause) {
-    const reason = (cause as { readonly reason?: unknown }).reason;
-    if (typeof reason === "string" && reason.length > 0) {
-      return safeAuthFailureReason(reason);
-    }
-  }
-  if (cause instanceof Error && cause.name) {
-    return safeAuthFailureReason(cause.name);
-  }
-  return "unknown";
-}
-
-function hasExpectedClerkAudience(audience: unknown, expectedAudience: string): boolean {
-  return typeof audience === "string"
-    ? audience === expectedAudience
-    : Array.isArray(audience) &&
-        audience.some((entry) => typeof entry === "string" && entry === expectedAudience);
-}
-
-function verifyClerkBearerToken(
-  config: RelayConfiguration.RelayConfiguration["Service"],
-  token: string,
-) {
-  return Effect.tryPromise({
-    try: () =>
-      verifyToken(token, {
-        secretKey: Redacted.value(config.clerkSecretKey),
-        audience: config.clerkJwtAudience,
-      }),
-    catch: (cause) => new ClerkTokenVerificationFailed({ cause }),
-  }).pipe(
-    Effect.withSpan("verify_clerk_bearer_token", {
-      attributes: { "relay.auth.token_length": token.length },
-    }),
-  );
-}
-
-function verifyClerkOAuthBearerToken(
-  config: RelayConfiguration.RelayConfiguration["Service"],
-  token: string,
-) {
-  return Effect.tryPromise({
-    try: async () => {
-      const client = createClerkClient({
-        secretKey: Redacted.value(config.clerkSecretKey),
-        publishableKey: config.clerkPublishableKey,
-      });
-      const state = await client.authenticateRequest(
-        new Request(config.relayIssuer, {
-          headers: { authorization: `Bearer ${token}` },
-        }),
-        { acceptsToken: "oauth_token" },
-      );
-      const auth = state.toAuth();
-      if (!state.isAuthenticated || !auth.userId) {
-        throw new Error("Clerk OAuth token is not authenticated.");
-      }
-      return { sub: auth.userId };
-    },
-    catch: (cause) => new ClerkTokenVerificationFailed({ cause }),
-  });
-}
-
-export function verifyRelayClientBearerToken(
-  config: RelayConfiguration.RelayConfiguration["Service"],
-  token: string,
-) {
-  return verifyClerkBearerToken(config, token).pipe(
-    Effect.flatMap((verified) =>
-      verified.sub && hasExpectedClerkAudience(verified.aud, config.clerkJwtAudience)
-        ? Effect.succeed({ sub: verified.sub, mode: "clerk_session_bearer" as const })
-        : Effect.fail(new ClerkTokenVerificationFailed({ cause: "missing_relay_audience" })),
-    ),
-    Effect.catch(() =>
-      verifyClerkOAuthBearerToken(config, token).pipe(
-        Effect.map((verified) => ({ ...verified, mode: "clerk_oauth_bearer" as const })),
-      ),
-    ),
-  );
 }
 
 const requireDpopPrincipalScope = Effect.fn("relay.api.require_dpop_principal_scope")(function* (

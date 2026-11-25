@@ -68,17 +68,21 @@ vi.mock(import("../../cloud/publicConfig"), async (original) => ({
   ...(await original()),
   hasCloudPublicConfig: () => state.cloud,
 }));
-vi.mock(import("@clerk/react"), async (original) => ({
-  ...(await original()),
-  useAuth: (() => state.auth) as never,
+vi.mock(import("../../cloud/oidcAuth"), () => ({
+  useCloudAuth: () => ({
+    isLoaded: state.auth.isLoaded,
+    isSignedIn: state.auth.isSignedIn,
+    userId: state.auth.userId,
+    user: null,
+    loadFailed: false,
+    getToken: () => Promise.resolve(null),
+    signIn: () => Promise.resolve(),
+    signOut: () => Promise.resolve(),
+    retry: () => {},
+  }),
 }));
-vi.mock(import("../clerk/clerkLoadFailure"), async (original) => ({
-  ...(await original()),
-  useClerkLoadFailed: () => false,
-}));
-vi.mock(import("../clerk/useT3ConnectAuthPrompt"), async (original) => ({
-  ...(await original()),
-  useT3ConnectAuthPrompt: (() => ({ openAuthPrompt: () => {} })) as never,
+vi.mock(import("../../cloud/useCloudAuthPrompt"), () => ({
+  useCloudAuthPrompt: () => ({ openAuthPrompt: () => {} }),
 }));
 vi.mock(import("../../cloud/cloudLinkState"), async (original) => {
   const { useAtomValue } = await import("@effect/atom-react");

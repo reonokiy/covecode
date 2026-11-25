@@ -11,15 +11,6 @@ import { setAgentAwarenessRelayTokenProvider } from "../agent-awareness/remoteRe
 import { requestConnectOnboarding } from "./connectOnboarding";
 import { restoreCloudComposerDrafts } from "../../state/use-composer-drafts";
 
-vi.mock("@clerk/expo", () => ({
-  ClerkProvider: vi.fn(),
-  useAuth: vi.fn(),
-}));
-
-vi.mock("@clerk/expo/token-cache", () => ({
-  tokenCache: {},
-}));
-
 vi.mock("../../lib/runtime", () => ({
   runtime: {
     runPromiseExit: vi.fn(),
@@ -43,11 +34,7 @@ vi.mock("../../state/use-composer-drafts", () => ({
 }));
 
 vi.mock("./publicConfig", () => ({
-  resolveCloudPublicConfig: vi.fn(() => ({
-    clerk: { publishableKey: null },
-    relay: { url: null },
-  })),
-  resolveRelayClerkTokenOptions: vi.fn(),
+  resolveCloudPublicConfig: vi.fn(() => ({ relay: { url: null } })),
 }));
 
 vi.mock("../agent-awareness/remoteRegistration", () => ({
@@ -56,21 +43,24 @@ vi.mock("../agent-awareness/remoteRegistration", () => ({
   unregisterAgentAwarenessDeviceForCurrentUser: vi.fn(),
 }));
 
-type ClerkListener = (resources: { readonly user: { readonly id: string } | null }) => void;
+type OidcListener = (resources: {
+  readonly client?: { readonly id?: string | null } | null;
+  readonly user?: { readonly id: string } | null;
+}) => void;
 
-function fakeClerk() {
-  const listeners = new Set<ClerkListener>();
-  const clerk = {
-    session: null,
-    addListener: (listener: ClerkListener) => {
+function fakeOidcSession() {
+  const listeners = new Set<OidcListener>();
+  const session = {
+    addListener: (listener: OidcListener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
   } as unknown as Parameters<typeof cloudAccountService.attach>[0];
   const emit = (userId: string | null) => {
-    for (const listener of listeners) listener({ user: userId === null ? null : { id: userId } });
+    for (const listener of listeners)
+      listener({ client: { id: "oidc" }, user: userId === null ? null : { id: userId } });
   };
-  return { clerk, emit };
+  return { clerk: session, emit };
 }
 
 afterEach(() => {
@@ -95,7 +85,7 @@ describe("CloudAuthProvider relay account isolation", () => {
 
 describe("cloudAccountService", () => {
   it("activates the signed-in account once its drafts are restored", async () => {
-    const { clerk, emit } = fakeClerk();
+    const { clerk, emit } = fakeOidcSession();
     using _detach = { [Symbol.dispose]: cloudAccountService.attach(clerk) };
 
     emit("account-1");
@@ -110,7 +100,7 @@ describe("cloudAccountService", () => {
   });
 
   it("retries an activation whose draft restore failed on the next emission", async () => {
-    const { clerk, emit } = fakeClerk();
+    const { clerk, emit } = fakeOidcSession();
     using _detach = { [Symbol.dispose]: cloudAccountService.attach(clerk) };
     vi.mocked(restoreCloudComposerDrafts).mockRejectedValueOnce(new Error("Storage busy."));
 

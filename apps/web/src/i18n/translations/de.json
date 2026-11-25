@@ -4937,6 +4937,9 @@
     },
     " und wähle dann „Aktualisieren“."
   ],
+  "edaebeea1915f9c1": "Konto",
+  "a656dc69a38a3639": "Sign out",
+  "daf8daec701f0863": "Konto",
   "cf09d31e268af127": "T3 Connect erneut versuchen",
   "6fa695d3a822bb9e": "Bei T3 Connect anmelden",
   "b28a147f66b0e088": "Verknüpfungsdatum nicht verfügbar",
@@ -4992,13 +4995,6 @@
   "ce6b7e994161e68f": "Route hinzufügen",
   "d3ef4f9486e31279": "Hinzufügen",
   "c246e33dafd359cc": "Hinzufügen",
-  "b0c1beb79a87d97b": "Autorisierungsanfrage",
-  "0311d7ed2b7eb2f6": "Dieser Verbindungslink ist unvollständig",
-  "09e69d04f7e588eb": "Dem Link fehlt die Autorisierungsanfrage. Führe `t3 connect` in deinem Terminal erneut aus und öffne die neu ausgegebene URL.",
-  "55ee748307f0cd6a": "Browser-Autorisierung",
-  "1ccae6b48df9cf15": "Dein Terminal wird verbunden",
-  "b3e7da67bc047933": "Weiterleitung zur Autorisierung von T3 Connect für deine CLI…",
-  "bb4cbcc32d3caec8": "Melde dich an, um mit der Autorisierung von T3 Connect für deine CLI fortzufahren.",
   "b6cc9af7a6d5e31b": "Veröffentlichen",
   "a624f5a1c3936a6b": "Geräte verbinden",
   "2e7604ad4afe0231": "T3 Connect aktiviert",
@@ -7689,15 +7685,15 @@
   "e1fcc4b74faaae02": "Tastenkürzel entfernen…",
   "efa55bbb1d3aa45e": "Änderungen prüfen",
   "3e02b74615e20d82": "Manuelle Einrichtung",
-  "99950f160873dfdf": [
-    "Deaktiviere die Aufnahme in Cove Code, um sie zu beenden. Entferne das Tastenkürzel aus ",
+  "84a8564b355b66bd": [
+    "Turn capture off in Cove Code to stop it. Remove the shortcut from",
+    " ",
     {
       "i": 1,
       "k": "_gt_value_1",
       "v": "v"
     },
-    ", ",
-    "um die Tasten freizugeben."
+    " to free up the keys."
   ],
   "4bf700ad94c0c486": "Ich habe das Tastenkürzel hinzugefügt",
   "bcdea6ebe1a65e63": "Zu verbindendes ChatGPT-Konto",
@@ -8954,7 +8950,6 @@
   "39a7578443219b8f": "Anmeldung beim Anbieter fehlgeschlagen. Versuch es erneut.",
   "179d3c67e76bb669": "Dieser Anmeldelink ist keine Webadresse und wurde daher nicht geöffnet.",
   "d80e10905a0fb8fb": "Die Anmeldeseite konnte nicht geöffnet werden. Kopiere den Link und öffne ihn in deinem Browser.",
-  "edaebeea1915f9c1": "Konto",
   "249cfb7532e0b380": "Anmeldemethode",
   "8e184b3520eac9bc": "Anbieterstandard",
   "1dea42922c13841d": "Anmeldelink kopieren",
@@ -9632,7 +9627,6 @@
     },
     " können Werte daraus per Name lesen. Die Werte werden beim Start eines Anbieters mit der op-CLI auf diesem Server gelesen."
   ],
-  "daf8daec701f0863": "Konto",
   "c3d6c8494c7d4b8f": "Das Konto-Kürzel, die Anmeldeadresse ohne https:// oder die ID, die op account list anzeigt.",
   "afa8b4a2e025dd36": "Wert",
   "13f8f1e086293635": "Quelle für {label}",

@@ -33,6 +33,13 @@ import * as ApnsProviderTokens from "./ApnsProviderTokens.ts";
 
 const config = RelayConfiguration.RelayConfiguration.of({
   relayIssuer: "https://relay.example.test",
+  oidc: null,
+  libp2p: {
+    enabled: false,
+    listenMultiaddrs: [],
+    announceMultiaddrs: [],
+    tunnelSecret: Redacted.make("test-tunnel-secret"),
+  },
   apns: {
     environment: "sandbox",
     teamId: "team-id",
@@ -41,9 +48,6 @@ const config = RelayConfiguration.RelayConfiguration.of({
     bundleId: "net.nokiy.cove.dev",
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-signing-secret"),
-  clerkSecretKey: Redacted.make("clerk-secret"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),
   cloudMintPublicKey: "cloud-public-key",
   managedEndpointBaseDomain: undefined,

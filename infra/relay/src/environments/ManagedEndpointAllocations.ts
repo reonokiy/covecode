@@ -10,7 +10,12 @@ import * as Schema from "effect/Schema";
 import * as SqlError from "effect/sql/SqlError";
 
 import * as RelayDb from "../db.ts";
-import { isManagedEndpointHostname, managedEndpointForHostname } from "../deploymentConfig.ts";
+import {
+  isManagedEndpointHostname,
+  isManagedEndpointPathKey,
+  managedEndpointForHostname,
+  managedEndpointUrls,
+} from "../deploymentConfig.ts";
 import { relayEnvironmentLinks, relayManagedEndpointAllocations } from "../persistence/schema.ts";
 
 export interface ManagedEndpointAllocation {
@@ -36,12 +41,29 @@ const MANAGED_ENDPOINT_ALLOCATION_LOOKUP_BATCH_SIZE = 500;
 export function resolveReadyManagedEndpoint(input: {
   readonly allocation: ManagedEndpointAllocation;
   readonly baseDomain: string | undefined;
+  readonly relayIssuer?: string | undefined;
 }): RelayManagedEndpoint | null {
   if (
-    !input.baseDomain ||
     input.allocation.readyAt === null ||
     input.allocation.tunnelId === null ||
-    input.allocation.dnsRecordId === null ||
+    input.allocation.dnsRecordId === null
+  ) {
+    return null;
+  }
+  if (isManagedEndpointPathKey(input.allocation.hostname) && input.relayIssuer) {
+    const urls = managedEndpointUrls({
+      relayIssuer: input.relayIssuer,
+      endpointKey: input.allocation.hostname.slice(2),
+      baseDomain: input.baseDomain,
+    });
+    return {
+      httpBaseUrl: urls.httpBaseUrl,
+      wsBaseUrl: urls.wsBaseUrl,
+      providerKind: "libp2p_tunnel",
+    };
+  }
+  if (
+    !input.baseDomain ||
     !isManagedEndpointHostname(input.allocation.hostname, input.baseDomain)
   ) {
     return null;
@@ -413,7 +435,7 @@ const make = Effect.gen(function* () {
                     eq(relayEnvironmentLinks.userId, input.userId),
                     eq(relayEnvironmentLinks.environmentId, input.environmentId),
                     eq(relayEnvironmentLinks.environmentPublicKey, input.environmentPublicKey),
-                    eq(relayEnvironmentLinks.endpointProviderKind, "cloudflare_tunnel"),
+                    eq(relayEnvironmentLinks.endpointProviderKind, "libp2p_tunnel"),
                     isNull(relayEnvironmentLinks.revokedAt),
                   ),
                 )

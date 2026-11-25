@@ -57,15 +57,14 @@ export function isLoopbackEndpointOrigin(origin: RelayManagedEndpointOrigin): bo
 
 export function isSupportedLinkProviderKind(request: RelayLinkProofRequest): boolean {
   return (
-    request.endpoint.providerKind === "cloudflare_tunnel" ||
-    request.endpoint.providerKind === "manual"
+    request.endpoint.providerKind === "libp2p_tunnel" || request.endpoint.providerKind === "manual"
   );
 }
 
 export function linkProofScopes(
   request: RelayLinkProofRequest,
 ): RelayEnvironmentLinkProofPayload["scopes"] {
-  return request.endpoint.providerKind === "cloudflare_tunnel"
+  return request.endpoint.providerKind === "libp2p_tunnel"
     ? ["agent_activity_notifications", "managed_tunnels"]
     : ["agent_activity_notifications"];
 }
@@ -97,6 +96,8 @@ export function managedEndpointRuntimeConfigsMatch(
     left.providerKind === right.providerKind &&
     left.connectorToken === right.connectorToken &&
     left.tunnelId === right.tunnelId &&
-    left.tunnelName === right.tunnelName
+    left.tunnelName === right.tunnelName &&
+    left.endpointKey === right.endpointKey &&
+    left.transportMode === right.transportMode
   );
 }

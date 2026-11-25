@@ -420,7 +420,7 @@ const unlinkRelayEnvironment = Effect.fn("cloud.cli.unlink_relay_environment")(f
   const response = yield* HttpClientRequest.delete(
     `${relayUrl}/v1/client/environment-links/${encodeURIComponent(environmentId)}`,
   ).pipe(
-    HttpClientRequest.bearerToken(token.value.accessToken),
+    HttpClientRequest.bearerToken(CliTokenManager.relayBearerToken(token.value)),
     httpClient.execute,
     Effect.flatMap(filterRelayResponse),
     Effect.flatMap(HttpClientResponse.schemaBodyJson(RelayOkResponse)),
@@ -453,12 +453,6 @@ const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconnect_resu
       );
     } else {
       yield* Console.log("T3 Connect is disabled locally.");
-      // A killed server cannot stop the connector it started, and nothing adopts it on restart.
-      if (input.liveResult.status === "server-gone") {
-        yield* Console.warn(
-          "The server that ran T3 Connect is gone, but its cloudflared process may still be running.\nStop that process if it is.",
-        );
-      }
     }
 
     if (Exit.isFailure(input.relayResult)) {
@@ -541,7 +535,7 @@ export const runCloudCommand = Effect.fn("cloud.cli.run_cloud_command")(function
       Layer.provide(ServerSecretStore.layer),
       Layer.provide(ExternalLauncher.layer),
     ),
-    RelayClient.layerCloudflared({ baseDir: config.baseDir }),
+    RelayClient.layerBuiltinLibp2p,
     EnvironmentAuth.layerRuntime,
     CliService.layer(config),
     RelayTracing.layerHeadlessRelayClient.pipe(Layer.provide(ManagedPolicy.layer)),
@@ -564,7 +558,7 @@ export const requireConnectAllowed = Effect.gen(function* () {
 const connectedAs = (identity: string | null): string => (identity ? ` as ${identity}` : "");
 
 function formatRelayClientReady(version: string): string {
-  return `✓ Relay client ready · cloudflared ${version}`;
+  return `✓ Relay client ready · built-in ${version}`;
 }
 
 const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(function* (options: {

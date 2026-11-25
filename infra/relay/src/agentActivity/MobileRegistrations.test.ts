@@ -137,6 +137,13 @@ function makeDeliveryAttempts(
 
 const config = RelayConfiguration.RelayConfiguration.of({
   relayIssuer: "https://relay.example.test",
+  oidc: null,
+  libp2p: {
+    enabled: false,
+    listenMultiaddrs: [],
+    announceMultiaddrs: [],
+    tunnelSecret: Redacted.make("test-tunnel-secret"),
+  },
   apns: {
     environment: "sandbox",
     teamId: "team-id",
@@ -144,9 +151,6 @@ const config = RelayConfiguration.RelayConfiguration.of({
     bundleId: "codes.t3.mobile",
     privateKey: Redacted.make("apns-private-key"),
   },
-  clerkSecretKey: Redacted.make("clerk-secret"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-job-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),
   cloudMintPublicKey: "cloud-public-key",

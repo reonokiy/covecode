@@ -44,10 +44,16 @@ import * as HttpClientError from "effect/http/HttpClientError";
 
 import { diagnoseEndpointFailure } from "./endpointFailure.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
+import * as Libp2pTunnelRegistry from "./Libp2pTunnelRegistry.ts";
 import * as ManagedEndpointAllocations from "./ManagedEndpointAllocations.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as CloudMintSigner from "../auth/CloudMintSigner.ts";
-import { isManagedEndpointHostname } from "../deploymentConfig.ts";
+import {
+  DEFAULT_MANAGED_ENDPOINT_NAMESPACE,
+  endpointKeyFromTunnelName,
+  isManagedEndpointHostname,
+  isManagedEndpointPathKey,
+} from "../deploymentConfig.ts";
 
 function environmentConnectNotAuthorizedReasonMessage(
   reason: RelayEnvironmentConnectNotAuthorizedReason,
@@ -299,9 +305,10 @@ export function validateManagedEndpoint(input: {
   readonly link: EnvironmentLinks.RelayLinkedEnvironmentRecord;
   readonly allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null;
   readonly baseDomain: string | undefined;
+  readonly relayIssuer?: string | undefined;
 }): Result.Result<RelayManagedEndpoint, ManagedEndpointValidationFailure> {
   const { link, allocation, baseDomain } = input;
-  if (link.endpoint.providerKind !== "cloudflare_tunnel") {
+  if (link.endpoint.providerKind !== "libp2p_tunnel") {
     return Result.fail({
       reason: "endpoint_provider_not_managed",
       attributes: { "relay.authorization.endpoint_provider_kind": link.endpoint.providerKind },
@@ -310,13 +317,14 @@ export function validateManagedEndpoint(input: {
   if (!allocation) {
     return Result.fail({ reason: "managed_endpoint_allocation_not_found" });
   }
+  const isPathEndpoint = isManagedEndpointPathKey(allocation.hostname);
   const allocationAttributes = {
     "relay.authorization.allocation_hostname": allocation.hostname,
     "relay.authorization.allocation_has_ready_at": allocation.readyAt !== null,
     "relay.authorization.allocation_has_tunnel_id": allocation.tunnelId !== null,
     "relay.authorization.allocation_has_dns_record_id": allocation.dnsRecordId !== null,
   };
-  if (!baseDomain) {
+  if (!isPathEndpoint && !baseDomain) {
     return Result.fail({
       reason: "managed_endpoint_base_domain_not_configured",
       attributes: allocationAttributes,
@@ -332,18 +340,29 @@ export function validateManagedEndpoint(input: {
       attributes: allocationAttributes,
     });
   }
-  if (!isManagedEndpointHostname(allocation.hostname, baseDomain)) {
+  if (
+    !isPathEndpoint &&
+    (!baseDomain || !isManagedEndpointHostname(allocation.hostname, baseDomain))
+  ) {
     return Result.fail({
       reason: "managed_endpoint_hostname_invalid",
       attributes: {
         ...allocationAttributes,
-        "relay.authorization.managed_endpoint_base_domain": baseDomain,
+        ...(baseDomain ? { "relay.authorization.managed_endpoint_base_domain": baseDomain } : {}),
       },
     });
   }
+  const fallbackOrigin = (() => {
+    try {
+      return new URL(link.endpoint.httpBaseUrl).origin;
+    } catch {
+      return undefined;
+    }
+  })();
   const endpoint = ManagedEndpointAllocations.resolveReadyManagedEndpoint({
     allocation,
     baseDomain,
+    relayIssuer: input.relayIssuer ?? fallbackOrigin,
   });
   if (
     endpoint === null ||
@@ -376,11 +395,47 @@ const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const signature = yield* Signature.Signature;
   const mint = yield* CloudMintSigner.CloudMintSigner;
+  const tunnelRegistryOption = yield* Effect.serviceOption(
+    Libp2pTunnelRegistry.Libp2pTunnelRegistry,
+  );
+  const tunnelRegistry = Option.getOrUndefined(tunnelRegistryOption);
+  const namespace = settings.managedEndpointNamespace ?? DEFAULT_MANAGED_ENDPOINT_NAMESPACE;
   const relayIssuer = normalizeRelayIssuer(settings.relayIssuer);
   const makeEnvironmentClient = (httpBaseUrl: string) =>
     makeEnvironmentHttpApiClient(httpBaseUrl).pipe(
       Effect.provideService(HttpClient.HttpClient, httpClient),
     );
+  const resolveInternalRequestUrl = (
+    endpoint: RelayManagedEndpoint,
+    allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null,
+  ): string => {
+    const internalBaseUrl = settings.libp2p?.internalGatewayBaseUrl;
+    if (!internalBaseUrl || !allocation) return endpoint.httpBaseUrl;
+    const key = endpointKeyFromTunnelName(namespace, allocation.tunnelName);
+    if (!key) return endpoint.httpBaseUrl;
+    return `${normalizeRelayIssuer(internalBaseUrl)}/t/${key}/`;
+  };
+  const enrichEndpointWithLibp2p = (
+    endpoint: RelayManagedEndpoint,
+    allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null,
+  ): RelayManagedEndpoint => {
+    if (endpoint.providerKind !== "libp2p_tunnel" || !allocation) return endpoint;
+    const key = endpointKeyFromTunnelName(namespace, allocation.tunnelName);
+    const registration = key && tunnelRegistry ? tunnelRegistry.getEndpointRegistration(key) : null;
+    const configuredAnnounce = settings.libp2p?.announceMultiaddrs ?? [];
+    const announceAddrs =
+      configuredAnnounce.length > 0
+        ? [...configuredAnnounce]
+        : tunnelRegistry
+          ? [...tunnelRegistry.getMultiaddrs()]
+          : [];
+    return {
+      ...endpoint,
+      ...(registration ? { libp2pPeerId: registration.peerId } : {}),
+      ...(announceAddrs.length > 0 ? { libp2pRelayMultiaddrs: announceAddrs } : {}),
+      ...(settings.libp2p?.enabled ? { transportMode: "p2p" as const } : {}),
+    };
+  };
   const resolveManagedEndpoint = Effect.fn("relay.environment_connector.resolve_managed_endpoint")(
     function* (input: {
       readonly operation: "connect" | "status";
@@ -391,6 +446,7 @@ const make = Effect.gen(function* () {
         link: input.link,
         allocation: input.allocation,
         baseDomain: settings.managedEndpointBaseDomain,
+        relayIssuer,
       });
       if (Result.isSuccess(result)) {
         return result.success;
@@ -480,7 +536,9 @@ const make = Effect.gen(function* () {
         );
       const checkedAt = DateTime.formatIso(now);
       const traceId = yield* currentTraceId;
-      const environmentClient = yield* makeEnvironmentClient(endpoint.httpBaseUrl);
+      const environmentClient = yield* makeEnvironmentClient(
+        resolveInternalRequestUrl(endpoint, allocation),
+      );
       const responseOption = yield* environmentClient.connect.health({ payload: { proof } }).pipe(
         withoutRedirects,
         Effect.match({
@@ -644,7 +702,9 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
-      const environmentClient = yield* makeEnvironmentClient(endpoint.httpBaseUrl);
+      const environmentClient = yield* makeEnvironmentClient(
+        resolveInternalRequestUrl(endpoint, allocation),
+      );
       const decoded = yield* environmentClient.connect
         .t3MintCredential({ payload: { proof } })
         .pipe(
@@ -693,7 +753,7 @@ const make = Effect.gen(function* () {
       }
       return {
         environmentId: link.environmentId,
-        endpoint,
+        endpoint: enrichEndpointWithLibp2p(endpoint, allocation),
         credential: decoded.credential,
         expiresAt: decoded.expiresAt,
       };

@@ -1,19 +1,18 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Redacted from "effect/Redacted";
 
 import * as RelayConfiguration from "../Config.ts";
+import { makeTestRelayConfiguration } from "../testConfig.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as HeldHooks from "./HeldHooks.ts";
 import * as HookInbox from "./HookInbox.ts";
 
-const settings = {
+const settings = makeTestRelayConfiguration({
   managedEndpointBaseDomain: "example.test",
   managedEndpointNamespace: "dev",
-  cloudMintPrivateKey: Redacted.make("unused"),
-} as RelayConfiguration.RelayConfiguration["Service"];
+});
 
 const environmentId = "env-hook";
 const ownKey = "0123456789abcdef";
@@ -44,7 +43,7 @@ const linkFor = (userId: string, key: string, environmentPublicKey: string) => (
   endpoint: {
     httpBaseUrl: `https://${key}.example.test/`,
     wsBaseUrl: `wss://${key}.example.test/ws`,
-    providerKind: "cloudflare_tunnel" as const,
+    providerKind: "libp2p_tunnel" as const,
   },
   environmentPublicKey,
   linkedAt: "2026-05-25T00:00:00.000Z",

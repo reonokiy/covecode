@@ -324,7 +324,7 @@ describe("ManagedTunnelLimits", () => {
                   (user_id, environment_id, environment_public_key, endpoint_http_base_url,
                    endpoint_ws_base_url, endpoint_provider_kind, revoked_at, managed_tunnels_enabled,
                    created_at, updated_at)
-                  values ('user-1', $1, 'key', 'https://e', 'wss://e', 'cloudflare_tunnel', $2, $3, $4, $4)`,
+                  values ('user-1', $1, 'key', 'https://e', 'wss://e', 'libp2p_tunnel', $2, $3, $4, $4)`,
                 [
                   entry.environmentId,
                   link.revoked === true ? at(link.updatedAt) : null,

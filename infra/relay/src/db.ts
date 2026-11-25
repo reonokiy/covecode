@@ -1,20 +1,17 @@
-import type { PgClient } from "@effect/sql-pg/PgClient";
-import * as Cloudflare from "@alchemy.run/cloudflare";
-import * as Drizzle from "@alchemy.run/drizzle";
-import * as Planetscale from "@alchemy.run/planetscale";
-import * as Alchemy from "alchemy";
-import * as RemovalPolicy from "alchemy/RemovalPolicy";
+import * as PgClient from "@effect/sql-pg/PgClient";
+import * as PgDrizzle from "drizzle-orm/effect-postgres";
 import type { EffectPgDatabase } from "drizzle-orm/effect-postgres";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-
-import { relayDatabaseMode } from "./dbConfig.ts";
+import * as Path from "effect/Path";
+import type * as Redacted from "effect/Redacted";
 
 export class RelayDb extends Context.Service<
   RelayDb,
   EffectPgDatabase & {
-    readonly $client: PgClient;
+    readonly $client: PgClient.PgClient;
   }
 >()("t3code-relay/db/RelayDb") {}
 
@@ -35,51 +32,65 @@ export class RelayTransactions extends Context.Service<
   );
 }
 
-export const PlanetscaleDatabase = Effect.gen(function* () {
-  const { stage } = yield* Alchemy.Stack;
-  const schema = yield* Drizzle.Schema("RelaySchema", {
-    schema: "./src/persistence/schema.ts",
-    out: "./migrations/postgres",
-    dialect: "postgres",
-  });
+export const layerPostgres = (databaseUrl: Redacted.Redacted<string>) => {
+  const pgLayer = PgClient.layer({ url: databaseUrl });
+  const drizzleLayer = Layer.effect(
+    RelayDb,
+    PgDrizzle.makeWithDefaults().pipe(Effect.map((db) => RelayDb.of(db))),
+  ).pipe(Layer.provideMerge(pgLayer));
 
-  const mode = relayDatabaseMode(stage);
-  const database =
-    mode === "shared-database"
-      ? yield* Planetscale.PostgresDatabase("RelayPostgresDatabase", {
-          name: "t3coderelay",
-          region: { slug: "us-west" },
-          clusterSize: "PS_160",
-          migrations: { dir: schema.out, table: "relay_migrations" },
-          replicas: 2,
-        }).pipe(RemovalPolicy.retain())
-      : yield* Planetscale.PostgresDatabase.ref("RelayPostgresDatabase", {
-          stage: "prod",
-        });
-  const branch =
-    mode === "stage-branch"
-      ? yield* Planetscale.PostgresBranch("RelayPostgresBranch", {
-          database,
-          migrations: { dir: schema.out, table: "relay_migrations" },
-        })
-      : undefined;
+  return Layer.mergeAll(drizzleLayer, RelayTransactions.layer.pipe(Layer.provide(drizzleLayer)));
+};
 
-  const runtimeRole = yield* Planetscale.PostgresRole("RelayPostgresRuntimeRole", {
-    database,
-    ...(branch ? { branch } : {}),
-    inheritedRoles: ["pg_read_all_data", "pg_write_all_data"],
-  });
+export const applyPostgresMigrations = Effect.fn("relay.db.apply_postgres_migrations")(function* (
+  migrationsDir: string,
+) {
+  const db = yield* RelayDb;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
 
-  return { branch, database, runtimeRole };
-});
+  const exists = yield* fs.exists(migrationsDir);
+  if (!exists) {
+    return { applied: [] as string[] };
+  }
 
-export const RelayHyperdrive = Effect.gen(function* () {
-  const { runtimeRole } = yield* PlanetscaleDatabase;
-  return yield* Cloudflare.Hyperdrive.Connection("RelayHyperdrive", {
-    origin: runtimeRole.origin,
-    caching: {
-      disabled: true,
-    },
-    originConnectionLimit: 40,
-  });
+  yield* db.$client.unsafe(
+    "CREATE TABLE IF NOT EXISTS relay_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+  );
+
+  const existingRows = yield* db.$client.unsafe<{ readonly name: string }>(
+    "SELECT name FROM relay_migrations",
+  );
+  const appliedSet = new Set(existingRows.map((row) => row.name));
+
+  const entries = yield* fs.readDirectory(migrationsDir);
+  const sorted = [...entries].toSorted();
+  const newlyApplied: string[] = [];
+
+  for (const folder of sorted) {
+    if (appliedSet.has(folder)) continue;
+    const sqlPath = path.join(migrationsDir, folder, "migration.sql");
+    if (!(yield* fs.exists(sqlPath))) continue;
+
+    const sqlText = yield* fs.readFileString(sqlPath);
+    const statements = sqlText
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim())
+      .filter((statement) => statement.length > 0);
+
+    yield* db.$client.withTransaction(
+      Effect.gen(function* () {
+        for (const statement of statements) {
+          yield* db.$client.unsafe(statement);
+        }
+        yield* db.$client.unsafe(
+          "INSERT INTO relay_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING",
+          [folder],
+        );
+      }),
+    );
+    newlyApplied.push(folder);
+  }
+
+  return { applied: newlyApplied };
 });

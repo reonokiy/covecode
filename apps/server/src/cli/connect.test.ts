@@ -27,9 +27,9 @@ import { resolveHostCliCommand } from "./invocation.ts";
 
 const managedExecutable = {
   status: "available",
-  executablePath: "/tmp/cloudflared",
+  executablePath: RelayClient.BUILTIN_RELAY_CLIENT_PATH,
   source: "managed",
-  version: RelayClient.CLOUDFLARED_VERSION,
+  version: RelayClient.BUILTIN_RELAY_CLIENT_VERSION,
 } as const;
 
 it.effect("does not install the relay client when the user declines the managed download", () =>
@@ -39,7 +39,7 @@ it.effect("does not install the relay client when the user declines the managed 
       {
         resolve: Effect.succeed({
           status: "missing",
-          version: RelayClient.CLOUDFLARED_VERSION,
+          version: RelayClient.BUILTIN_RELAY_CLIENT_VERSION,
         }),
         install: Effect.sync(() => {
           installCalls += 1;
@@ -50,7 +50,6 @@ it.effect("does not install the relay client when the user declines the managed 
             installCalls += 1;
             return managedExecutable;
           }),
-        pruneManagedVersions: Effect.void,
       },
       () => Effect.succeed(false),
       () => Effect.void,
@@ -187,14 +186,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       }),
     );
 
-    it.effect("warns that a server that is gone may have left its connector running", () =>
-      Effect.gen(function* () {
-        const { warnings } = yield* runConnect(deadPid, { portFreed: true });
-
-        assert.include(warnings.join("\n"), "its cloudflared process may still be running");
-      }),
-    );
-
     it.effect("does not send a token to whatever took over a dead server's port", () =>
       Effect.gen(function* () {
         const { requests } = yield* runConnect(deadPid);
@@ -237,7 +228,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
 
         assert.deepEqual(requests, ["POST /api/connect/unlink"]);
         assert.include(printed, "T3 Connect is disabled locally.");
-        assert.notInclude(warnings.join("\n"), "cloudflared process");
+        assert.notInclude(warnings.join("\n"), "Restart that server");
       }),
     );
   },

@@ -74,14 +74,12 @@ it.effect("reports an unrecognized access denial without printing its response b
     const error = yield* filterRelayResponse(
       response(403, "<html>private upstream details</html>", {
         "content-type": "text/html",
-        "cf-ray": "abcdef1234-IAD",
       }),
     ).pipe(Effect.flip);
 
     expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "forbidden" });
     expect(error.message).toContain("HTTP 403");
     expect(error.message).toContain("proxy or firewall");
-    expect(error.message).toContain("Cloudflare Ray ID: abcdef1234-IAD");
     expect(error.message).not.toContain("private upstream details");
   }),
 );

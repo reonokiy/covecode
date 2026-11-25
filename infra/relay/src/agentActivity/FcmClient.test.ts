@@ -29,6 +29,13 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const config = {
   relayIssuer: "https://relay.test",
+  oidc: null,
+  libp2p: {
+    enabled: false,
+    listenMultiaddrs: [],
+    announceMultiaddrs: [],
+    tunnelSecret: Redacted.make("test-tunnel-secret"),
+  },
   apns: {
     environment: "sandbox",
     teamId: "team",
@@ -37,9 +44,6 @@ const config = {
     privateKey: Redacted.make("unused"),
   },
   fcmServiceAccount: Redacted.make(encodeJson(account)),
-  clerkSecretKey: Redacted.make("unused"),
-  clerkPublishableKey: "unused",
-  clerkJwtAudience: "unused",
   apnsDeliveryJobSigningSecret: Redacted.make("unused"),
   cloudMintPrivateKey: Redacted.make("unused"),
   cloudMintPublicKey: "unused",

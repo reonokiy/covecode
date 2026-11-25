@@ -27,6 +27,13 @@ const keyPair = NodeCrypto.generateKeyPairSync("ed25519", {
 });
 const config = RelayConfiguration.RelayConfiguration.of({
   relayIssuer: "https://relay.example.test",
+  oidc: null,
+  libp2p: {
+    enabled: false,
+    listenMultiaddrs: [],
+    announceMultiaddrs: [],
+    tunnelSecret: Redacted.make("test-tunnel-secret"),
+  },
   apns: {
     environment: "sandbox",
     teamId: "team-id",
@@ -35,9 +42,6 @@ const config = RelayConfiguration.RelayConfiguration.of({
     bundleId: "net.nokiy.cove.dev",
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
-  clerkSecretKey: Redacted.make("clerk-secret"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
   cloudMintPrivateKey: Redacted.make(keyPair.privateKey),
   cloudMintPublicKey: keyPair.publicKey,
   managedEndpointBaseDomain: undefined,

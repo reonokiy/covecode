@@ -3,9 +3,13 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
+import { normalizeRelayIssuer } from "@t3tools/shared/relayJwt";
+
 import * as RelayConfiguration from "../Config.ts";
 import {
-  MANAGED_ENDPOINT_KEY_PATTERN,
+  DEFAULT_MANAGED_ENDPOINT_NAMESPACE,
+  endpointKeyFromTunnelName,
+  legacyManagedEndpointTunnelNameForKey,
   managedEndpointTunnelNameForKey,
 } from "../deploymentConfig.ts";
 import { validateManagedEndpoint } from "../environments/EnvironmentConnector.ts";
@@ -13,11 +17,7 @@ import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as HookInbox from "./HookInbox.ts";
 
-export const endpointKeyForTunnelName = (namespace: string, tunnelName: string): string | null => {
-  const prefix = managedEndpointTunnelNameForKey(namespace, "");
-  const key = tunnelName.startsWith(prefix) ? tunnelName.slice(prefix.length) : "";
-  return MANAGED_ENDPOINT_KEY_PATTERN.test(key) ? key : null;
-};
+export const endpointKeyForTunnelName = endpointKeyFromTunnelName;
 
 type PersistenceError =
   | EnvironmentLinks.EnvironmentLinkEnvironmentLookupPersistenceError
@@ -57,10 +57,14 @@ const make = Effect.gen(function* () {
   const resolveEndpoint: HeldHooks["Service"]["resolveEndpoint"] = Effect.fn(
     "relay.hooks.resolve_endpoint",
   )(function* (endpointKey) {
-    if (!settings.managedEndpointNamespace) return null;
-    const allocation = yield* allocations.getByTunnelName(
-      managedEndpointTunnelNameForKey(settings.managedEndpointNamespace, endpointKey),
-    );
+    const namespace = settings.managedEndpointNamespace ?? DEFAULT_MANAGED_ENDPOINT_NAMESPACE;
+    const allocation =
+      (yield* allocations.getByTunnelName(
+        managedEndpointTunnelNameForKey(namespace, endpointKey),
+      )) ??
+      (yield* allocations.getByTunnelName(
+        legacyManagedEndpointTunnelNameForKey(namespace, endpointKey),
+      ));
     if (allocation === null) return null;
     const [link] = yield* links.findActiveManagedForEnvironment({
       environmentId: allocation.environmentId,
@@ -71,10 +75,16 @@ const make = Effect.gen(function* () {
       link,
       allocation,
       baseDomain: settings.managedEndpointBaseDomain,
+      relayIssuer: settings.relayIssuer,
     });
     if (Result.isFailure(result)) return null;
+    const internalBaseUrl = settings.libp2p?.internalGatewayBaseUrl;
+    const httpBaseUrl = internalBaseUrl
+      ? `${normalizeRelayIssuer(internalBaseUrl)}/t/${endpointKey}/`
+      : result.success.httpBaseUrl;
     return {
       ...result.success,
+      httpBaseUrl,
       environmentId: allocation.environmentId,
       holdWhileOffline: link.holdWebhooksWhileOffline,
     };
@@ -85,8 +95,7 @@ const make = Effect.gen(function* () {
     readonly environmentId: string;
     readonly environmentPublicKey: string;
   }) {
-    const namespace = settings.managedEndpointNamespace;
-    if (!namespace) return [];
+    const namespace = settings.managedEndpointNamespace ?? DEFAULT_MANAGED_ENDPOINT_NAMESPACE;
     const ownLinks = yield* links.findActiveManagedForEnvironment(input);
     const keys: Array<string> = [];
     for (const link of ownLinks) {

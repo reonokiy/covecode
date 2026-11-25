@@ -116,7 +116,19 @@ function isSecureManagedEndpoint(endpoint: RelayEnvironmentLinkProofPayload["end
   try {
     const httpUrl = new URL(endpoint.httpBaseUrl);
     const wsUrl = new URL(endpoint.wsBaseUrl);
-    return httpUrl.protocol === "https:" && wsUrl.protocol === "wss:";
+    if (httpUrl.protocol === "https:" && wsUrl.protocol === "wss:") {
+      return true;
+    }
+    const httpHost = normalizeHostname(httpUrl.hostname);
+    const wsHost = normalizeHostname(wsUrl.hostname);
+    const isLoopback = (host: string) =>
+      host === "127.0.0.1" || host === "::1" || host === "localhost";
+    return (
+      httpUrl.protocol === "http:" &&
+      wsUrl.protocol === "ws:" &&
+      isLoopback(httpHost) &&
+      isLoopback(wsHost)
+    );
   } catch {
     return false;
   }

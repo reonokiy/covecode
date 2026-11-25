@@ -2,7 +2,7 @@ import { T, useGT, useMessages } from "gt-react-native";
 import { Button } from "../../components/ui/Button";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { ConnectionTraceId } from "./ConnectionTraceId";
-import { useAuth } from "@clerk/expo";
+import { useMobileCloudAuth } from "../cloud/useMobileCloudAuth";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
   hasSavedBearerRoute,
@@ -57,7 +57,7 @@ export function CloudEnvironmentRows(props: CloudEnvironmentRowsProps) {
 }
 
 function SignedInCloudEnvironmentRows(props: CloudEnvironmentRowsProps) {
-  const { isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const { isSignedIn } = useMobileCloudAuth();
   if (!isSignedIn) return <ConnectedOnlyCloudEnvironmentRows {...props} />;
   return <CloudEnvironmentRowsContent {...props} />;
 }

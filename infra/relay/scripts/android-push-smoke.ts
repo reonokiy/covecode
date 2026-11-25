@@ -83,11 +83,15 @@ const main = Effect.gen(function* () {
   const now = yield* Clock.currentTimeMillis;
   const config: RelayConfiguration.RelayConfiguration["Service"] = {
     relayIssuer: "http://localhost",
+    oidc: null,
+    libp2p: {
+      enabled: false,
+      listenMultiaddrs: [],
+      announceMultiaddrs: [],
+      tunnelSecret: Redacted.make(""),
+    },
     fcmServiceAccount: Redacted.make(credentials),
     apns: null,
-    clerkSecretKey: Redacted.make(""),
-    clerkPublishableKey: "",
-    clerkJwtAudience: "",
     apnsDeliveryJobSigningSecret: Redacted.make(""),
     cloudMintPrivateKey: Redacted.make(""),
     cloudMintPublicKey: "",

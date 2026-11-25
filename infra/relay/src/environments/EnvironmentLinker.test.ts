@@ -21,6 +21,7 @@ import * as RelayDb from "../db.ts";
 import * as EnvironmentCredentials from "./EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "./EnvironmentLinks.ts";
 import * as RelayConfiguration from "../Config.ts";
+import { makeTestRelayConfiguration } from "../testConfig.ts";
 import * as EnvironmentLinker from "./EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
 
@@ -32,23 +33,9 @@ const environmentKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
   privateKeyEncoding: { format: "pem", type: "pkcs8" },
   publicKeyEncoding: { format: "pem", type: "spki" },
 });
-const config = RelayConfiguration.RelayConfiguration.of({
-  relayIssuer: "https://relay.example.test",
-  apns: {
-    environment: "sandbox",
-    teamId: "team-id",
-    keyId: "key-id",
-    privateKey: Redacted.make("private-key"),
-    bundleId: "net.nokiy.cove.dev",
-  },
-  apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
-  clerkSecretKey: Redacted.make("clerk-secret"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
+const config = makeTestRelayConfiguration({
   cloudMintPrivateKey: Redacted.make(relayKeyPair.privateKey),
   cloudMintPublicKey: relayKeyPair.publicKey,
-  managedEndpointBaseDomain: undefined,
-  managedEndpointNamespace: undefined,
 });
 const isEnvironmentLinkProofInvalid = Schema.is(EnvironmentLinker.EnvironmentLinkProofInvalid);
 
@@ -116,6 +103,7 @@ function layerTest(input?: {
   readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
   readonly consume?: DpopProofs.DpopProofReplay["Service"]["consume"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly provision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["provision"];
 }) {
   return EnvironmentLinker.layer.pipe(
     Layer.provideMerge(RelayTokens.layer.pipe(Layer.provide(CloudMintSigner.layer))),
@@ -149,15 +137,17 @@ function layerTest(input?: {
           prepareDeprovision: input?.prepareDeprovision ?? (() => Effect.succeed(null)),
           deprovision: input?.deprovision ?? (() => Effect.succeed(true)),
           release: () => Effect.succeed(true),
-          provision: () =>
-            Effect.succeed({
-              endpoint: {
-                httpBaseUrl: "https://managed.example.test/",
-                wsBaseUrl: "wss://managed.example.test/ws",
-                providerKind: "cloudflare_tunnel",
-              },
-              runtime: { providerKind: "cloudflare_tunnel", connectorToken: "connector-token" },
-            }),
+          provision:
+            input?.provision ??
+            (() =>
+              Effect.succeed({
+                endpoint: {
+                  httpBaseUrl: "https://managed.example.test/",
+                  wsBaseUrl: "wss://managed.example.test/ws",
+                  providerKind: "libp2p_tunnel",
+                },
+                runtime: { providerKind: "libp2p_tunnel", connectorToken: "connector-token" },
+              })),
         }),
       ),
     ),
@@ -181,6 +171,47 @@ describe("EnvironmentLinker", () => {
           upsert: (input) =>
             Effect.sync(() => {
               persistedEnvironmentId = input.proof.environmentId;
+            }),
+        }),
+      ),
+    );
+  });
+
+  it.effect("allows loopback HTTP managed endpoints and rejects non-loopback HTTP", () => {
+    let endpointUrls = {
+      httpBaseUrl: "http://127.0.0.1:8787/t/0123456789abcdef/",
+      wsBaseUrl: "ws://127.0.0.1:8787/t/0123456789abcdef/ws",
+    };
+    return Effect.gen(function* () {
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      const firstRequest = { ...(yield* makeRequest).request, managedTunnelsEnabled: true };
+      const loopbackResult = yield* linker.link({ userId: "user_123", request: firstRequest });
+      expect(loopbackResult.endpoint.httpBaseUrl).toBe("http://127.0.0.1:8787/t/0123456789abcdef/");
+
+      endpointUrls = {
+        httpBaseUrl: "http://insecure.example.test/t/0123456789abcdef/",
+        wsBaseUrl: "ws://insecure.example.test/t/0123456789abcdef/ws",
+      };
+      const secondRequest = { ...(yield* makeRequest).request, managedTunnelsEnabled: true };
+      const nonLoopbackError = yield* linker
+        .link({ userId: "user_123", request: secondRequest })
+        .pipe(Effect.flip);
+      expect(nonLoopbackError).toMatchObject({
+        _tag: "EnvironmentLinkProofInvalid",
+        reason: "endpoint_not_secure",
+        stage: "validate_endpoint",
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          provision: () =>
+            Effect.succeed({
+              endpoint: {
+                httpBaseUrl: endpointUrls.httpBaseUrl,
+                wsBaseUrl: endpointUrls.wsBaseUrl,
+                providerKind: "libp2p_tunnel",
+              },
+              runtime: { providerKind: "libp2p_tunnel", connectorToken: "connector-token" },
             }),
         }),
       ),
@@ -303,7 +334,7 @@ describe("EnvironmentLinker", () => {
       endpoint: {
         httpBaseUrl: "https://managed.example.test/",
         wsBaseUrl: "wss://managed.example.test/ws",
-        providerKind: "cloudflare_tunnel" as const,
+        providerKind: "libp2p_tunnel" as const,
       },
       environmentPublicKey,
       linkedAt: "2026-01-01T00:00:00.000Z",

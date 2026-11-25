@@ -2,6 +2,7 @@
 import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import { buildOidcAuthorizeUrl } from "@t3tools/shared/oidc";
 import * as Clock from "effect/Clock";
 import * as Cause from "effect/Cause";
 import * as Console from "effect/Console";
@@ -26,22 +27,17 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
-import { buildConnectAuthorizeRequestUrl } from "@t3tools/shared/connectAuth";
-
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ExternalLauncher from "../process/externalLauncher.ts";
-import {
-  cloudCliOAuthConfig,
-  hostedAppUrlConfig,
-  type CloudCliOAuthConfig,
-} from "./publicConfig.ts";
 import { renderLoopbackAuthorizationCompleteHtml } from "./cliAuthHtml.ts";
+import { type CloudCliOidcEndpoints, resolveCloudCliOidcConfig } from "./publicConfig.ts";
 
 const CLOUD_CLI_OAUTH_TOKEN_SECRET = "cloud-cli-oauth-token";
 const CLOUD_CLI_OAUTH_CALLBACK_TIMEOUT = Duration.minutes(10);
 const CLOUD_CLI_OAUTH_REFRESH_EARLY_MS = Duration.toMillis(Duration.minutes(5));
 const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
-// RFC 8628 defaults, used only when Clerk omits the field.
+const DEFAULT_TOKEN_EXPIRES_IN_SECONDS = 3600;
+// RFC 8628 defaults, used only when the IdP omits the field.
 const DEVICE_AUTHORIZATION_DEFAULT_INTERVAL = Duration.seconds(5);
 // RFC 8628 §3.5: a slow_down response means "add 5 seconds to the interval".
 const DEVICE_AUTHORIZATION_SLOW_DOWN_INCREMENT = Duration.seconds(5);
@@ -124,10 +120,26 @@ const waitForLoopbackAuthorization = Effect.fn("cloud.cli_token.wait_for_loopbac
 const PersistedToken = Schema.Struct({
   accessToken: Schema.String,
   refreshToken: Schema.String,
+  idToken: Schema.optional(Schema.String),
   expiresAtEpochMs: Schema.Number,
   identity: Schema.optional(Schema.String),
 });
 export type PersistedToken = typeof PersistedToken.Type;
+
+const JWT_COMPACT_RE = /^[^.\s]+\.[^.\s]+\.[^.\s]+$/u;
+
+/**
+ * Standard OIDC providers may issue opaque access tokens alongside a JWT `id_token`.
+ * Prefer the JWT `accessToken` when it is compact JWS, otherwise fall back to `idToken`.
+ */
+export function relayBearerToken(token: Pick<PersistedToken, "accessToken" | "idToken">): string {
+  if (JWT_COMPACT_RE.test(token.accessToken)) {
+    return token.accessToken;
+  }
+  return token.idToken !== undefined && token.idToken.length > 0
+    ? token.idToken
+    : token.accessToken;
+}
 
 const PersistedTokenJson = Schema.fromJsonString(PersistedToken);
 const decodePersistedToken = Schema.decodeUnknownEffect(PersistedTokenJson);
@@ -137,8 +149,8 @@ const OAuthTokenResponse = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.optional(Schema.String),
   id_token: Schema.optional(Schema.String),
-  expires_in: Schema.Number,
-  token_type: Schema.String,
+  expires_in: Schema.optional(Schema.Number),
+  token_type: Schema.optional(Schema.String),
 });
 
 const OAuthErrorResponse = Schema.Struct({
@@ -270,6 +282,7 @@ export const CloudCliTokenManagerError = Schema.Union([
   CloudCliAuthorizationDeniedError,
 ]);
 export type CloudCliTokenManagerError = typeof CloudCliTokenManagerError.Type;
+const isCloudCliTokenManagerError = Schema.is(CloudCliTokenManagerError);
 
 export class CloudCliTokenManager extends Context.Service<
   CloudCliTokenManager,
@@ -300,12 +313,14 @@ const readTokenResponse = Effect.fn("cloud.cli_token.read_token_response")(funct
 ) {
   const body = yield* HttpClientResponse.schemaBodyJson(OAuthTokenResponse)(response);
   const now = yield* Clock.currentTimeMillis;
+  const expiresInSeconds = body.expires_in ?? DEFAULT_TOKEN_EXPIRES_IN_SECONDS;
   const identity = idTokenIdentity(body.id_token);
   return {
     token: {
       accessToken: body.access_token,
       refreshToken: body.refresh_token ?? params.refresh_token ?? "",
-      expiresAtEpochMs: now + body.expires_in * 1_000,
+      ...(body.id_token === undefined ? {} : { idToken: body.id_token }),
+      expiresAtEpochMs: now + expiresInSeconds * 1_000,
       ...(identity === null ? {} : { identity }),
     } satisfies PersistedToken,
     identity,
@@ -313,7 +328,7 @@ const readTokenResponse = Effect.fn("cloud.cli_token.read_token_response")(funct
 });
 
 const exchangeToken = Effect.fn("cloud.cli_token.exchange")(function* (
-  metadata: Pick<CloudCliOAuthConfig, "tokenEndpoint">,
+  metadata: Pick<CloudCliOidcEndpoints, "tokenEndpoint">,
   params: Record<string, string>,
 ) {
   const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
@@ -388,7 +403,7 @@ const isTransportError = (error: unknown) =>
   HttpClientError.isHttpClientError(error) && error.reason._tag === "TransportError";
 
 const pollDeviceToken = Effect.fn("cloud.cli_token.poll_device_token")(function* (
-  metadata: Pick<CloudCliOAuthConfig, "tokenEndpoint" | "clientId">,
+  metadata: Pick<CloudCliOidcEndpoints, "tokenEndpoint" | "clientId">,
   deviceCode: string,
   initialInterval: Duration.Duration,
 ) {
@@ -437,12 +452,21 @@ const pollDeviceToken = Effect.fn("cloud.cli_token.poll_device_token")(function*
 
 export const deviceAuthorizationLogin = Effect.fn("cloud.cli_token.device_authorization_login")(
   function* <E, R>(showPrompt: (prompt: DeviceAuthorizationPrompt) => Effect.Effect<void, E, R>) {
-    const metadata = yield* cloudCliOAuthConfig;
+    const metadata = yield* resolveCloudCliOidcConfig;
+    if (metadata.deviceAuthorizationEndpoint === undefined) {
+      return yield* new CloudCliAuthorizationError({
+        cause:
+          "OIDC provider does not support device authorization flow (missing device_authorization_endpoint).",
+      });
+    }
     const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
     const authorization = yield* HttpClientRequest.post(metadata.deviceAuthorizationEndpoint).pipe(
       HttpClientRequest.bodyUrlParams({
         client_id: metadata.clientId,
         scope: metadata.scopes.join(" "),
+        ...(metadata.audience !== undefined && metadata.audience.length > 0
+          ? { audience: metadata.audience }
+          : {}),
       }),
       httpClient.execute,
       Effect.flatMap(HttpClientResponse.schemaBodyJson(DeviceAuthorizationResponse)),
@@ -498,28 +522,57 @@ export const make = Effect.gen(function* () {
   });
 
   const refresh = Effect.fn("cloud.cli_token.refresh")(function* (token: PersistedToken) {
-    const metadata = yield* cloudCliOAuthConfig;
+    if (token.refreshToken.length === 0) {
+      return yield* new CloudCliCredentialRefreshError({
+        status: 401,
+        oauthErrorCode: "invalid_grant",
+        cause: "No refresh token stored.",
+      });
+    }
+    const metadata = yield* resolveCloudCliOidcConfig;
     const { token: refreshed } = yield* exchangeToken(metadata, {
       grant_type: "refresh_token",
       refresh_token: token.refreshToken,
       client_id: metadata.clientId,
     });
-    return refreshed.identity === undefined && token.identity !== undefined
-      ? { ...refreshed, identity: token.identity }
-      : refreshed;
+    return {
+      ...refreshed,
+      ...(refreshed.identity === undefined && token.identity !== undefined
+        ? { identity: token.identity }
+        : {}),
+      ...(refreshed.idToken === undefined && token.idToken !== undefined
+        ? { idToken: token.idToken }
+        : {}),
+    } satisfies PersistedToken;
   });
 
   const login = Effect.fn("cloud.cli_token.login")(function* () {
-    const metadata = yield* cloudCliOAuthConfig;
-    const hostedAppUrl = yield* hostedAppUrlConfig;
+    const metadata = yield* resolveCloudCliOidcConfig;
     const { verifier, challenge, state } = yield* makePkceRequest;
-    const callback = yield* Deferred.make<string>();
+    const callback = yield* Deferred.make<
+      string,
+      CloudCliAuthorizationDeniedError | CloudCliAuthorizationError
+    >();
     const layerCallbackRoute = HttpRouter.add(
       "GET",
       "/callback",
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const url = new URL(request.originalUrl, metadata.redirectUri);
+        const oauthError = url.searchParams.get("error");
+        if (oauthError !== null) {
+          const errorDescription = url.searchParams.get("error_description");
+          yield* Deferred.fail(
+            callback,
+            oauthError === "access_denied"
+              ? new CloudCliAuthorizationDeniedError()
+              : new CloudCliAuthorizationError({ cause: errorDescription ?? oauthError }),
+          );
+          return HttpServerResponse.text(
+            errorDescription ?? `T3 Connect authorization failed (${oauthError}).`,
+            { status: 400 },
+          );
+        }
         const code = url.searchParams.get("code");
         if (url.searchParams.get("state") !== state || !code) {
           return HttpServerResponse.text("Invalid T3 Connect authorization callback.", {
@@ -543,12 +596,16 @@ export const make = Effect.gen(function* () {
       ),
       Layer.build,
     );
-    // /connect establishes a Clerk session first; /oauth/authorize loses parameters across sign-in.
-    const authorizationUrl = buildConnectAuthorizeRequestUrl({
-      hostedAppUrl,
+    const authorizationUrl = buildOidcAuthorizeUrl({
+      authorizationEndpoint: metadata.authorizationEndpoint,
+      clientId: metadata.clientId,
+      redirectUri: metadata.redirectUri,
+      scope: metadata.scopes,
       state,
-      challenge,
-      loopbackPort: metadata.loopbackPort,
+      codeChallenge: challenge,
+      ...(metadata.audience !== undefined && metadata.audience.length > 0
+        ? { extraParams: { audience: metadata.audience } }
+        : {}),
     });
     yield* Console.log(formatLoopbackAuthorizationPrompt(authorizationUrl));
     const authorization = yield* waitForLoopbackAuthorization({
@@ -625,7 +682,9 @@ export const make = Effect.gen(function* () {
         : authorization;
     }).pipe(
       Effect.mapError((cause) =>
-        Terminal.isQuitError(cause) ? cause : new CloudCliAuthorizationError({ cause }),
+        Terminal.isQuitError(cause) || isCloudCliTokenManagerError(cause)
+          ? cause
+          : new CloudCliAuthorizationError({ cause }),
       ),
       Effect.provide(services),
     ),

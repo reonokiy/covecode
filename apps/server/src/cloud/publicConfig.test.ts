@@ -1,23 +1,34 @@
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Result from "effect/Result";
 
 import {
   hostedAppUrlConfig,
-  makeCloudCliOAuthConfig,
   makeRelayUrlConfig,
+  makeResolveCloudCliOidcConfig,
   resolveRelayClientTracingConfig,
 } from "./publicConfig.ts";
 
 const provideEnv = (env: Readonly<Record<string, string>>) =>
   Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })));
 
-it.effect("rejects an insecure runtime relay URL override", () =>
+it.effect("rejects a non-loopback HTTP runtime relay URL override", () =>
   makeRelayUrlConfig("https://embedded.example.test").pipe(
     provideEnv({ T3CODE_RELAY_URL: "http://runtime.example.test" }),
     Effect.flip,
   ),
+);
+
+it.effect("accepts a loopback HTTP runtime relay URL override", () =>
+  Effect.gen(function* () {
+    const resolved = yield* makeRelayUrlConfig("https://embedded.example.test").pipe(
+      provideEnv({ T3CODE_RELAY_URL: "http://127.0.0.1:8787/" }),
+    );
+    assert.equal(resolved, "http://127.0.0.1:8787");
+  }),
 );
 
 it.effect("rejects malformed or insecure hosted app URLs", () =>
@@ -37,21 +48,134 @@ it.effect("rejects malformed or insecure hosted app URLs", () =>
   }),
 );
 
-it.effect("derives direct Clerk OAuth endpoints from statically injected public config", () =>
+it.effect("resolves CLI OIDC endpoints via explicit env issuer and OIDC discovery", () =>
   Effect.gen(function* () {
-    const config = yield* makeCloudCliOAuthConfig({
-      clerkPublishableKeyFallback: "pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==",
-      clerkCliOAuthClientIdFallback: "oauth_client_embedded",
-    }).pipe(provideEnv({}));
+    const requests: Array<string> = [];
+    const httpClient = HttpClient.make((request) => {
+      requests.push(request.url);
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            issuer: "https://idp.example.test/realms/cove",
+            authorization_endpoint: "https://idp.example.test/realms/cove/auth",
+            token_endpoint: "https://idp.example.test/realms/cove/token",
+            device_authorization_endpoint: "https://idp.example.test/realms/cove/device",
+            jwks_uri: "https://idp.example.test/realms/cove/jwks",
+          }),
+        ),
+      );
+    });
 
+    const config = yield* makeResolveCloudCliOidcConfig().pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      provideEnv({
+        T3CODE_OIDC_ISSUER: "https://idp.example.test/realms/cove/",
+        T3CODE_OIDC_CLIENT_ID: "cove-cli",
+        T3CODE_OIDC_AUDIENCE: "cove-relay",
+        T3CODE_OIDC_SCOPES: "openid profile email",
+      }),
+    );
+
+    assert.deepEqual(requests, [
+      "https://idp.example.test/realms/cove/.well-known/openid-configuration",
+    ]);
     assert.deepEqual(config, {
-      tokenEndpoint: "https://clerk.example.test/oauth/token",
-      deviceAuthorizationEndpoint: "https://clerk.example.test/oauth/device_authorization",
-      clientId: "oauth_client_embedded",
+      issuer: "https://idp.example.test/realms/cove",
+      clientId: "cove-cli",
+      audience: "cove-relay",
+      authorizationEndpoint: "https://idp.example.test/realms/cove/auth",
+      tokenEndpoint: "https://idp.example.test/realms/cove/token",
+      deviceAuthorizationEndpoint: "https://idp.example.test/realms/cove/device",
       loopbackPort: 34338,
       redirectUri: "http://127.0.0.1:34338/callback",
-      scopes: ["openid", "profile", "email", "offline_access"],
+      scopes: ["openid", "profile", "email"],
     });
+  }),
+);
+
+it.effect("auto-discovers CLI OIDC config from the control plane when env vars are unset", () =>
+  Effect.gen(function* () {
+    const requests: Array<string> = [];
+    const httpClient = HttpClient.make((request) => {
+      requests.push(request.url);
+      if (request.url === "https://relay.example.test/.well-known/cove-control-plane") {
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            Response.json({
+              controlPlaneUrl: "https://relay.example.test",
+              oidc: {
+                issuer: "https://idp.example.test",
+                clientId: "cove-public-client",
+                audience: null,
+                scopes: ["openid", "email", "offline_access"],
+              },
+              libp2p: {
+                enabled: true,
+                peerId: null,
+                relayMultiaddrs: [],
+              },
+            }),
+          ),
+        );
+      }
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            issuer: "https://idp.example.test",
+            authorization_endpoint: "https://idp.example.test/authorize",
+            token_endpoint: "https://idp.example.test/token",
+            jwks_uri: "https://idp.example.test/jwks",
+          }),
+        ),
+      );
+    });
+
+    const config = yield* makeResolveCloudCliOidcConfig().pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      provideEnv({ T3CODE_RELAY_URL: "https://relay.example.test" }),
+    );
+
+    assert.deepEqual(requests, [
+      "https://relay.example.test/.well-known/cove-control-plane",
+      "https://idp.example.test/.well-known/openid-configuration",
+    ]);
+    assert.deepEqual(config, {
+      issuer: "https://idp.example.test",
+      clientId: "cove-public-client",
+      authorizationEndpoint: "https://idp.example.test/authorize",
+      tokenEndpoint: "https://idp.example.test/token",
+      loopbackPort: 34338,
+      redirectUri: "http://127.0.0.1:34338/callback",
+      scopes: ["openid", "email", "offline_access"],
+    });
+  }),
+);
+
+it.effect("rejects OIDC discovery documents whose issuer does not match", () =>
+  Effect.gen(function* () {
+    const httpClient = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            issuer: "https://other.example.test",
+            authorization_endpoint: "https://idp.example.test/auth",
+            token_endpoint: "https://idp.example.test/token",
+            jwks_uri: "https://idp.example.test/jwks",
+          }),
+        ),
+      ),
+    );
+
+    const error = yield* makeResolveCloudCliOidcConfig({
+      issuerFallback: "https://idp.example.test",
+      clientIdFallback: "cove-cli",
+    }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), provideEnv({}), Effect.flip);
+
+    assert.include(error.message, "did not match expected");
   }),
 );
 

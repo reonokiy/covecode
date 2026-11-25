@@ -1,7 +1,6 @@
 import "vite-plus/test/config";
 import { defineConfig } from "vite-plus";
 import * as NodeURL from "node:url";
-import { remoteCacheUrl } from "./infra/task-cache/src/remoteCache.ts";
 import { cachedTestTasks } from "./scripts/lib/cached-tests.ts";
 
 const TEST_EXCLUDE = [
@@ -90,8 +89,7 @@ const RESTRICTED_PULL_REQUEST_GLYPH_IMPORTS = {
     "Pick a glyph by meaning from PullRequestGlyph in apps/web/src/components/pullRequest/pullRequestIcons.tsx so every surface draws the same pull request the same way.",
 };
 
-// Vite+ supports remote configuration before its published types include it.
-const cacheUrl = remoteCacheUrl(import.meta.dirname);
+const cacheUrl = process.env.VP_REMOTE_CACHE_URL?.trim() || undefined;
 const taskCacheConfig = {
   scripts: false,
   ...(cacheUrl ? { remote: { url: cacheUrl } } : {}),
@@ -180,7 +178,6 @@ export default defineConfig({
   fmt: {
     ignorePatterns: [
       ".repos/**",
-      "infra/task-cache/vendor/**",
       // Macroscope requires one glob per line; Markdown formatting corrupts it.
       ".macroscope/ignore.md",
       ".alchemy",
@@ -216,7 +213,6 @@ export default defineConfig({
     ignorePatterns: [
       ".repos",
       ".repos/**",
-      "infra/task-cache/vendor/**",
       "dist",
       "dist-electron",
       "node_modules",

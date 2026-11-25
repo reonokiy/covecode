@@ -17,24 +17,8 @@ afterAll(() => {
   NodeFS.rmSync(clerkStateDir, { recursive: true, force: true });
 });
 
-const { createClerkBridgeMock, requestSingleInstanceLockMock, storageAdapter, storageMock } =
-  vi.hoisted(() => ({
-    createClerkBridgeMock: vi.fn(),
-    requestSingleInstanceLockMock: vi.fn(() => true),
-    storageAdapter: {
-      getItem: vi.fn(),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-    },
-    storageMock: vi.fn(),
-  }));
-
-vi.mock("@clerk/electron", () => ({
-  createClerkBridge: createClerkBridgeMock,
-}));
-
-vi.mock("@clerk/electron/storage", () => ({
-  storage: storageMock,
+const { requestSingleInstanceLockMock } = vi.hoisted(() => ({
+  requestSingleInstanceLockMock: vi.fn(() => true),
 }));
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -112,9 +96,7 @@ const layerDesktopClerk = (
 
 describe("DesktopClerk", () => {
   beforeEach(() => {
-    createClerkBridgeMock.mockReset();
     requestSingleInstanceLockMock.mockReset().mockReturnValue(true);
-    storageMock.mockReset();
   });
 
   it.each([
@@ -122,35 +104,30 @@ describe("DesktopClerk", () => {
       name: "packaged macOS",
       isDevelopment: false,
       platform: "darwin" as const,
-      userData: "/tmp/app-data/t3code-v2",
+      userData: "/tmp/app-data/covecode-v2",
     },
     {
       name: "packaged Linux",
       isDevelopment: false,
       platform: "linux" as const,
-      userData: "/tmp/app-data/t3code-v2",
+      userData: "/tmp/app-data/covecode-v2",
     },
     {
       name: "packaged Windows",
       isDevelopment: false,
       platform: "win32" as const,
-      userData: "/tmp/app-data/t3code-v2",
+      userData: "/tmp/app-data/covecode-v2",
     },
     {
       name: "development",
       isDevelopment: true,
       platform: "win32" as const,
-      userData: "/tmp/app-data/t3code-dev",
+      userData: "/tmp/app-data/covecode-dev",
     },
   ])(
-    "creates the bridge before startup can yield to the event loop ($name)",
+    "acquires the single-instance lock before startup can yield to the event loop ($name)",
     ({ isDevelopment, platform, userData }) => {
       const events: string[] = [];
-      storageMock.mockReturnValue(storageAdapter);
-      createClerkBridgeMock.mockImplementation(() => {
-        events.push("createClerkBridge");
-        return { cleanup: vi.fn(), isPrimaryInstance: true };
-      });
       // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- The assertion IS that the layer builds synchronously; it.effect would mask a regression to async.
       Effect.runSync(
         Effect.scoped(
@@ -165,20 +142,13 @@ describe("DesktopClerk", () => {
         "requestSingleInstanceLock",
         "on:second-instance",
         "on:open-url",
-        "createClerkBridge",
       ]);
-      assert.deepEqual(storageMock.mock.calls, [
-        [{ path: NodePath.join(NodePath.resolve(clerkStateDir), "clerk") }],
-      ]);
-      assert.notStrictEqual(createClerkBridgeMock.mock.calls[0]?.[0]?.storage, storageAdapter);
     },
   );
 
   it.effect.each(["before configure", "after configure"] as const)(
     "reveals the running window when a second instance launches %s",
     (entry) => {
-      storageMock.mockReturnValue(storageAdapter);
-      createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
       const quit = vi.fn();
       const listeners = new Map<string, (...args: unknown[]) => void>();
       const revealed = Promise.withResolvers<unknown>();
@@ -214,8 +184,6 @@ describe("DesktopClerk", () => {
   );
 
   it.effect("delivers each queued startup link once, before later links", () => {
-    storageMock.mockReturnValue(storageAdapter);
-    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
     const listeners = new Map<string, (...args: unknown[]) => void>();
     const received: string[] = [];
     const first = "covecode://new?prompt=first";
@@ -265,11 +233,10 @@ describe("DesktopClerk", () => {
   });
 
   it.effect.each(["darwin", "win32", "linux"] as const)(
-    "quits a second launch before initializing Clerk or the application runtime on %s",
+    "quits a second launch before initializing the application runtime on %s",
     (platform) =>
       Effect.gen(function* () {
         requestSingleInstanceLockMock.mockReturnValueOnce(false);
-        createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
         const events: string[] = [];
         const runtime = layerDesktopClerk(false, events, platform).pipe(
           Layer.flatMap(() =>
@@ -284,69 +251,60 @@ describe("DesktopClerk", () => {
 
         assert.isTrue(Exit.hasInterrupts(exit));
         assert.deepEqual(events, [
-          "setPath:userData:/tmp/app-data/t3code-v2",
+          "setPath:userData:/tmp/app-data/covecode-v2",
           "requestSingleInstanceLock",
           "quit",
         ]);
-        assert.equal(createClerkBridgeMock.mock.calls.length, 0);
-        assert.equal(storageMock.mock.calls.length, 0);
       }),
   );
 });
 
-it.effect(
-  "provider auth deep links navigate and reveal the running desktop without handling Clerk URLs",
-  () => {
-    storageMock.mockReturnValue(storageAdapter);
-    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
-    const listeners = new Map<string, (...args: unknown[]) => void>();
-    const revealed = Promise.withResolvers<void>();
-    const loadURL = vi.fn(async (_url: string) => undefined);
-    const window = { loadURL };
-    const electronApp = {
-      on: (name: string, listener: (...args: unknown[]) => void) =>
-        Effect.sync(() => {
-          listeners.set(name, listener);
-        }),
-    } as unknown as ElectronApp.ElectronApp["Service"];
-    const electronWindow = {
-      currentMainOrFirst: Effect.succeedSome(window),
-      reveal: () => Effect.sync(() => revealed.resolve()),
-    } as unknown as ElectronWindow.ElectronWindow["Service"];
-    return Effect.gen(function* () {
-      const clerk = yield* DesktopClerk.DesktopClerk;
-      yield* clerk.configure;
-      const event = { preventDefault: vi.fn() };
-      listeners.get("open-url")!(event, "covecode-dev://app/auth/callback?code=clerk-code");
-      listeners.get("open-url")!(event, "covecode://app/welcome");
-      assert.equal(loadURL.mock.calls.length, 0);
-      assert.equal(event.preventDefault.mock.calls.length, 0);
-      listeners.get("second-instance")!({}, [
-        "t3",
-        "covecode-dev://app/settings/providers?instanceId=work&code=never-forward",
-      ]);
-      yield* Effect.promise(() => revealed.promise);
-      assert.deepEqual(loadURL.mock.calls, [
-        ["covecode-dev://app/settings/providers?instanceId=work"],
-      ]);
-      listeners.get("open-url")!(event, "covecode-dev://app/welcome#agents:machine-id");
-      assert.equal(event.preventDefault.mock.calls.length, 1);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, undefined, listeners)),
-      Effect.provideService(ElectronApp.ElectronApp, electronApp),
-      Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
-      Effect.provideService(DesktopWebLinks.DesktopWebLinks, ignoreWebLinks),
-    );
-  },
-);
+it.effect("provider auth deep links navigate and reveal the running desktop", () => {
+  const listeners = new Map<string, (...args: unknown[]) => void>();
+  const revealed = Promise.withResolvers<void>();
+  const loadURL = vi.fn(async (_url: string) => undefined);
+  const window = { loadURL };
+  const electronApp = {
+    on: (name: string, listener: (...args: unknown[]) => void) =>
+      Effect.sync(() => {
+        listeners.set(name, listener);
+      }),
+  } as unknown as ElectronApp.ElectronApp["Service"];
+  const electronWindow = {
+    currentMainOrFirst: Effect.succeedSome(window),
+    reveal: () => Effect.sync(() => revealed.resolve()),
+  } as unknown as ElectronWindow.ElectronWindow["Service"];
+  return Effect.gen(function* () {
+    const clerk = yield* DesktopClerk.DesktopClerk;
+    yield* clerk.configure;
+    const event = { preventDefault: vi.fn() };
+    listeners.get("open-url")!(event, "covecode-dev://app/auth/callback?code=clerk-code");
+    listeners.get("open-url")!(event, "covecode://app/welcome");
+    assert.equal(loadURL.mock.calls.length, 0);
+    assert.equal(event.preventDefault.mock.calls.length, 0);
+    listeners.get("second-instance")!({}, [
+      "t3",
+      "covecode-dev://app/settings/providers?instanceId=work&code=never-forward",
+    ]);
+    yield* Effect.promise(() => revealed.promise);
+    assert.deepEqual(loadURL.mock.calls, [
+      ["covecode-dev://app/settings/providers?instanceId=work"],
+    ]);
+    listeners.get("open-url")!(event, "covecode-dev://app/welcome#agents:machine-id");
+    assert.equal(event.preventDefault.mock.calls.length, 1);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, undefined, listeners)),
+    Effect.provideService(ElectronApp.ElectronApp, electronApp),
+    Effect.provideService(ElectronWindow.ElectronWindow, electronWindow),
+    Effect.provideService(DesktopWebLinks.DesktopWebLinks, ignoreWebLinks),
+  );
+});
 
 it.effect.each(["startup", "open-url", "early-second-instance"] as const)(
   "receives hosted web sign-in through the desktop %s handler",
   (entry) =>
     Effect.gen(function* () {
-      storageMock.mockReturnValue(storageAdapter);
-      createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
       const port = yield* Effect.promise(async () => {
         const server = NodeHttp.createServer();
         await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -429,8 +387,6 @@ it.effect.each(["startup", "open-url", "early-second-instance"] as const)(
 
 it.effect("hands web and app links to the renderer and leaves other links alone", () =>
   Effect.gen(function* () {
-    storageMock.mockReturnValue(storageAdapter);
-    createClerkBridgeMock.mockReturnValue({ cleanup: vi.fn(), isPrimaryInstance: true });
     const listeners = new Map<string, (...args: unknown[]) => void>();
     const electronApp = {
       whenReady: Effect.void,

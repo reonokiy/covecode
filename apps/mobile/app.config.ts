@@ -87,7 +87,7 @@ const VARIANT_CONFIG = {
     scheme: "covecode-dev",
     iosBundleIdentifier: "net.nokiy.cove.dev",
     androidPackage: "net.nokiy.cove.dev",
-    relyingParty: "clerk.t3.codes",
+    relyingParty: "t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
@@ -95,7 +95,7 @@ const VARIANT_CONFIG = {
     scheme: "covecode-preview",
     iosBundleIdentifier: "net.nokiy.cove.preview",
     androidPackage: "net.nokiy.cove.preview",
-    relyingParty: "clerk.t3.codes",
+    relyingParty: "t3.codes",
     assets: PREVIEW_ASSETS,
   },
   production: {
@@ -103,7 +103,7 @@ const VARIANT_CONFIG = {
     scheme: "covecode",
     iosBundleIdentifier: "net.nokiy.cove",
     androidPackage: "net.nokiy.cove",
-    relyingParty: "clerk.t3.codes",
+    relyingParty: "t3.codes",
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -369,8 +369,6 @@ const config: ExpoConfig = {
         mode: APP_VARIANT === "development" ? "development" : "production",
       },
     ],
-    // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -477,15 +475,6 @@ const config: ExpoConfig = {
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },
-    clerk: {
-      publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
-      jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
-    },
-    // Clerk reads these exact names at prebuild. Omit unset values: manifest null becomes truthy {}.
-    EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
     observability: {
       telemetryEnabled: mobileTelemetryEnabled,
       tracesUrl: repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ?? null,

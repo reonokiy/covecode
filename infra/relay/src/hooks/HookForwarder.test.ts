@@ -24,6 +24,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
 import * as CloudMintSigner from "../auth/CloudMintSigner.ts";
 import * as RelayConfiguration from "../Config.ts";
+import { makeTestRelayConfiguration } from "../testConfig.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import { RELAY_HTTP_ROUTER_CONFIG, traceRelayHttpRequestWith } from "../http/Api.ts";
@@ -39,18 +40,13 @@ const mintKeys = NodeCrypto.generateKeyPairSync("ed25519", {
   publicKeyEncoding: { format: "pem", type: "spki" },
 });
 
-const settings: RelayConfiguration.RelayConfiguration["Service"] = {
-  relayIssuer: "https://relay.example.test",
+const settings = makeTestRelayConfiguration({
   apns: null,
-  clerkSecretKey: Redacted.make("clerk-secret-key"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "t3-code-relay",
-  apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make(mintKeys.privateKey),
   cloudMintPublicKey: mintKeys.publicKey,
   managedEndpointBaseDomain: "example.test",
   managedEndpointNamespace: "dev",
-};
+});
 
 const environmentId = "env-hook";
 const endpointKey = "0123456789abcdef";
@@ -75,7 +71,7 @@ const managedLink = {
   endpoint: {
     httpBaseUrl: "https://env.example.test/",
     wsBaseUrl: "wss://env.example.test/ws",
-    providerKind: "cloudflare_tunnel" as const,
+    providerKind: "libp2p_tunnel" as const,
   },
   environmentPublicKey: "public-key",
   linkedAt: "2026-05-25T00:00:00.000Z",
@@ -506,7 +502,7 @@ describe("HookForwarder", () => {
         }),
       );
 
-    it.effect("holds when cloudflared answers that the local server is down", () =>
+    it.effect("holds when tunnel gateway answers that the local server is down", () =>
       Effect.gen(function* () {
         for (const status of [502, 503, 504, 530]) {
           const harness = makeHarness({
