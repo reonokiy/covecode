@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -27,11 +28,21 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
       - id: version
-        name: Verify stable release tag
+        name: Verify release tag and select channel
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          number='(0|[1-9][0-9]*)'
+          version="v${number}[.]${number}[.]${number}"
+          if [[ "$GITHUB_REF_NAME" =~ ^${version}$ ]]; then
+            channel=stable
+          elif [[ "$GITHUB_REF_NAME" =~ ^${version}-nightly[.][0-9]{8}[.]${number}$ ]]; then
+            channel=nightly
+          else
+            echo "::error::Expected vX.Y.Z or vX.Y.Z-nightly.YYYYMMDD.N"
+            exit 1
+          fi
           git merge-base --is-ancestor HEAD origin/covecode
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-ci-deps
       - run: node scripts/update-release-package-versions.ts "${GITHUB_REF_NAME#v}"
       - run: vp run build:desktop:bundle
@@ -119,7 +130,7 @@ jobs:
       cli_archive: ${{ matrix.resource != 'darwin-x64' }}
       version: ${{ needs.bundle.outputs.version }}
       ref: ${{ github.sha }}
-      release_channel: stable
+      release_channel: ${{ needs.bundle.outputs.channel }}
       relay_client_tracing: false
       relay_url: ""
       clerk_publishable_key: ""
@@ -145,7 +156,7 @@ jobs:
       version: ${{ needs.bundle.outputs.version }}
 
   publish:
-    needs: [control_panel, web]
+    needs: [bundle, control_panel, web]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -182,10 +193,17 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.bundle.outputs.channel }}
         run: |
+          flags=()
+          title="Cove Code"
+          if [[ "$CHANNEL" == nightly ]]; then
+            flags=(--prerelease --latest=false)
+            title="Cove Code Nightly"
+          fi
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Cove Code ${GITHUB_REF_NAME#v}" --generate-notes
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$title ${GITHUB_REF_NAME#v}" --generate-notes "${flags[@]}"
           fi
           [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == true ]]
           gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          gh release edit "$GITHUB_REF_NAME" --draft=false "${flags[@]}"

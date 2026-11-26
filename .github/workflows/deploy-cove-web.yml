@@ -44,7 +44,9 @@ jobs:
         run: vp build
       - name: Package web client and build image
         run: |
-          node scripts/apply-web-brand-assets.ts production
+          brand=production
+          if [[ "$VERSION" == *-nightly.* ]]; then brand=nightly; fi
+          node scripts/apply-web-brand-assets.ts "$brand"
           tar -czf "infra/web/cove-web-${VERSION:-$GITHUB_SHA}.tar.gz" -C apps/web/dist .
           docker build --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE:$GITHUB_SHA" infra/web
