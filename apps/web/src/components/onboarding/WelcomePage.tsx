@@ -107,7 +107,6 @@ import { ACPRegistryIcon } from "../Icons";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { QRCodeSvg } from "../ui/qr-code";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
@@ -996,28 +995,20 @@ function PhoneSection({ environmentId }: { readonly environmentId: EnvironmentId
           </CollapsibleTrigger>
         </div>
         <CollapsiblePanel>
-          <div className="flex items-center gap-8 pt-2 pb-3 pl-8">
-            <ol className="min-w-0 flex-1 space-y-5">
-              <PhoneStep step={1}>
-                <p className="text-sm text-foreground">
-                  <T>Scan with your phone to get the app.</T>
-                </p>
-              </PhoneStep>
-              <PhoneStep step={2}>
-                <PhoneConnectLink environmentId={environmentId} />
-              </PhoneStep>
-            </ol>
-            {/* One code for both stores: the link opens the store that matches the phone. */}
-            <div className="shrink-0 rounded-lg bg-white p-1.5">
-              <QRCodeSvg
-                value={MOBILE_APP_URL}
-                size={124}
-                level="M"
-                marginSize={2}
-                title={gt("Cove Code app for iPhone and Android")}
-              />
-            </div>
-          </div>
+          <ol className="space-y-5 pt-2 pb-3 pl-8">
+            <PhoneStep step={1}>
+              <Button
+                size="sm"
+                variant="outline"
+                render={<a href={MOBILE_APP_URL} target="_blank" rel="noreferrer noopener" />}
+              >
+                <T>Build from source</T>
+              </Button>
+            </PhoneStep>
+            <PhoneStep step={2}>
+              <PhoneConnectLink environmentId={environmentId} />
+            </PhoneStep>
+          </ol>
         </CollapsiblePanel>
       </Collapsible>
     </WelcomeSection>
@@ -2010,11 +2001,11 @@ function CliPathSetup() {
         {setup.added ? (
           <T>
             Added to <Var>{setup.file}</Var>. Open a new terminal to use{" "}
-            <code className="font-mono">t3</code>.
+            <code className="font-mono">cove</code>.
           </T>
         ) : (
           <T>
-            Use <code className="font-mono">t3</code> from any terminal. Adds one line to{" "}
+            Use <code className="font-mono">cove</code> from any terminal. Adds one line to{" "}
             <Var>{setup.file}</Var>.
           </T>
         )}

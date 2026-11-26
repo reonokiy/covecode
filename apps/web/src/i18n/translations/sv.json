@@ -1489,7 +1489,7 @@
   "19eb7450f158369f": "Det går inte att öppna länkar.",
   "677242baa5ae4528": "Ange en HTTPS-adress eller använd HTTP på localhost.",
   "8849ba196ef38a12": "Det gick inte att starta inloggningen. Kontrollera kontrollpanelens adress och försök igen.",
-  "6fa695d3a822bb9e": "Logga in på T3 Connect",
+  "ec21b232e0eacd4a": "Logga in",
   "c0596fc0c605682a": "Kontrollpanelens adress",
   "7ac4455553fe632a": "Fortsätt",
   "ef24f1aa3b4962b0": "Kunde inte läsa T3 Connect-länkens status.",
@@ -2152,25 +2152,24 @@
   "0e2f68b7c6915c72": "Öppna Miljöer",
   "6b4bbecf3df324fa": "Försök logga in igen",
   "83be7aade7ff6360": "Inloggad",
-  "ec21b232e0eacd4a": "Logga in",
   "665d27df5960e6b2": "Väntar på din dator…",
   "c65de112b48a66ed": "Lägg till parkopplingslänk",
   "bc8ab792af1d656f": "Kör på din dator:",
   "0ba14e4e920cfa00": "Eller ladda ned skrivbordsappen",
   "0e79b7a6508a6286": "Sedan",
-  "363b9991fa23d36b": [
+  "60198db95161a516": [
     "Hoppa över installationen om du redan har ",
     {
       "t": "code",
       "i": 1,
-      "c": "t3"
+      "c": "cove"
     },
     ". Om",
     " ",
     {
       "t": "code",
       "i": 2,
-      "c": "t3"
+      "c": "cove"
     },
     " inte hittas efter installationen, lägg till mappen som installationsprogrammet anger i din PATH."
   ],
@@ -2987,8 +2986,8 @@
   "62450481c00d2ef3": "Utkastets miljö är inte tillgänglig för att städa transkriptionen.",
   "c64cb58d9cecbcd2": "Det gick inte att städa transkriptionen",
   "0674544195fcdc39": "Den ursprungliga transkriptionen lades till.",
-  "296496693cdac0db": "Kommandot t3 är inte tillgängligt.",
-  "efbcef7bc9bbda01": "Det gick inte att läsa in statusen för kommandot t3.",
+  "d17444525c15387b": "Kommandot cove är inte tillgängligt.",
+  "5bff39e7eb9874cc": "Det gick inte att läsa in statusen för kommandot cove.",
   "1bf6910332426e62": "Skrivbordsappens nätverksåtkomst är inte tillgänglig.",
   "453d2f1825d6e763": "Det gick inte att läsa in skrivbordsserverns exponeringsstatus.",
   "2f388f3d76869c03": "Det gick inte att läsa in skrivbordsappens annonserade slutpunkter.",
@@ -4947,7 +4946,6 @@
   "edaebeea1915f9c1": "Konto",
   "a656dc69a38a3639": "Sign out",
   "daf8daec701f0863": "Konto",
-  "cf09d31e268af127": "Försök med T3 Connect igen",
   "b28a147f66b0e088": "Länkdatumet är inte tillgängligt",
   "6f0589fb1a5e38a9": "Länkad {date}",
   "ba921b079703d6d5": "Hanterad tunnel",
@@ -5889,6 +5887,7 @@
   "402ad504ab1fe6a4": "Länkade: {environments}",
   "9ec433045537acfc": "Kontrollera igen",
   "88f60e3d23ebcdd8": "Kontrollerar T3 Connect…",
+  "6fa695d3a822bb9e": "Logga in på T3 Connect",
   "5492129175e04f8d": "Ditt T3 Connect-konto har slut på tunnlar.",
   "27f1ee2a5a0e7d5c": [
     "Starta om Cove Code på ",
@@ -6025,7 +6024,6 @@
   "bd2304f25f6f999e": "{selected, plural, one {{selected} av {total} markerad} other {{selected} av {total} markerade}}",
   "228cd9fd55a55070": "Kunde inte kontrollera projekten igen. {error}",
   "1cc599c5f5874014": "Telefon",
-  "8d4b4b7072952366": "Cove Code-appen för iPhone och Android",
   "431bee88ecc944e4": "Kontrollera T3 Connect",
   "c747696796f64468": "T3 Connect är på, men appen kan inte nå den här datorn.",
   "96557a906f6167b9": "Inloggad. Dela den här datorn så att appen kan nå den.",
@@ -6111,7 +6109,7 @@
   "5c6a6009aedbf1d0": "Markera allt",
   "24c98c5086b8e76e": "Välj ingen",
   "1282b693a6130b09": "Använd Cove Code på telefonen",
-  "37c66042ce1906da": "Skanna med telefonen för att skaffa appen.",
+  "c8cc67eac3023f31": "Bygg från källkod",
   "1b4364ef89b07f35": "Kunde inte kontrollera T3 Connect.",
   "7b10d40dd15938e5": "Din telefon kan nå den här datorn. Logga in i appen med samma konto.",
   "8330812e7b81f020": "T3 Connect är på för den här datorn. Logga in i appen med samma konto.",
@@ -6134,7 +6132,7 @@
     "i den här terminalen."
   ],
   "9d9b9624c7bd95df": "Andra mappar",
-  "1eb8f3d4695033fb": [
+  "26ff3bf845277d59": [
     "Tillagd i ",
     {
       "i": 1,
@@ -6146,16 +6144,16 @@
     {
       "t": "code",
       "i": 2,
-      "c": "t3"
+      "c": "cove"
     },
     "."
   ],
-  "ad72bb102aa39c31": [
+  "c9548c9b39ea4108": [
     "Använd ",
     {
       "t": "code",
       "i": 1,
-      "c": "t3"
+      "c": "cove"
     },
     " från valfri terminal. Lägger till en rad i",
     " ",
@@ -7728,15 +7726,15 @@
       "v": "v"
     }
   ],
-  "d0e747ae0c4f68a5": "Kunde inte installera t3",
-  "ba3ac338f36cba74": "Kunde inte ta bort t3",
-  "9c942b53b58119b8": "Kunde inte lägga till t3 i PATH",
-  "543a976cc5696c5c": "En annan t3 i {path} körs först i en ny terminal. Ta bort den för att använda Cove Codes.",
-  "743eac3fce0c736d": "Kör Cove Codes CLI som `t3` från valfri terminal.",
+  "874d0fd948f205ac": "Kunde inte installera cove",
+  "b7e80d77d09745d5": "Kunde inte ta bort cove",
+  "42d2287daa1d5ac7": "Kunde inte lägga till cove i PATH",
+  "6e3a9be4c8633ca2": "En annan cove i {path} körs först i en ny terminal. Ta bort den för att använda Cove Codes.",
+  "e55702f8b1fe002e": "Kör Cove Codes CLI som `cove` från valfri terminal.",
   "4f6e93011ef2da6f": "Installerad i {path}. Öppna en ny terminal för att använda den.",
   "371ca438cf467125": "Installerad i {path} och tillagd i PATH i {file}. Öppna en ny terminal för att använda den.",
   "fd3eece9d1a7ea38": "Installerad i {path}, som inte finns i din PATH än.",
-  "5fff98fa978bd008": "Installerad i {path}, som inte finns i din PATH än. Lägg till mappen i din PATH för att köra `t3`.",
+  "9dceff74388303c8": "Installerad i {path}, som inte finns i din PATH än. Lägg till mappen i din PATH för att köra `cove`.",
   "dc06294dd4078b00": "Ta bort",
   "b707d919dbf0222a": "Installera",
   "9a284b5893dc04a2": "OpenRouter-modell",
@@ -8706,7 +8704,7 @@
   "e1789f863205ad5a": "Kunde inte länka miljön",
   "40cde51afa218290": "Länkade {label}",
   "eefe994332120d82": "Länka",
-  "fb71127e5746a6bc": "Från Delning och åtkomst där, eller t3 pair",
+  "3d24e96a49cbd142": "Från Delning och åtkomst där, eller cove pair",
   "130e51beb6cf5aad": "Länka en miljö",
   "122c3e355699e69d": "Agenter här kan sedan starta, skicka meddelanden till och vänta på trådar där. Den visas under Auktoriserade klienter i miljöns Delning och åtkomst, där den kan återkallas.",
   "dc9a0b68d101e904": "Redan länkad. Om du länkar igen förnyas den med den åtkomst du väljer.",
@@ -8755,10 +8753,7 @@
   "0be6b2546df12f66": "Stoppa",
   "7dbd7e8943e8931f": "Öppnar mikrofonen…",
   "efa31f38b611e912": "Kunde inte spela upp inspelningen. Försök spela in igen.",
-  "0cebac0a2a6bdc99": "iPhone och iPad",
   "d797c9687a256a50": "Anslut till din server från din telefon eller surfplatta.",
-  "c21858dee1b62639": "Länk till {store}",
-  "cdcdc54a444a3636": "Skanna med telefonens kamera.",
   "c9a68022f0fb840c": [
     "Vi rekommenderar inte att du hanterar flera ",
     {
@@ -9436,8 +9431,8 @@
   "ae3971c4379c262f": "T3 Connect är på, men andra enheter kan inte nå den här miljön.",
   "8fddf21c28c34154": "T3 Connect är på. Nåbarheten har inte kontrollerats än.",
   "b2cf3dccd52f02ec": "T3 Connect är inte synkroniserat. Miljön är bara länkad för att publicera agentaktivitet, så andra enheter kan inte ansluta. Slå på T3 Connect för att reparera det.",
-  "bf1a82ceb6a864f5": "Miljön togs bort från T3 Connect. Kör `t3 connect link` på värden för att länka den igen.",
-  "35e9516df892595b": "Kör `t3 connect link` på värden och starta sedan om Cove Code där.",
+  "1475a9a304f78c98": "Miljön togs bort från T3 Connect. Kör `cove connect link` på värden för att länka den igen.",
+  "8a5179fbc4471bda": "Kör `cove connect link` på värden och starta sedan om Cove Code där.",
   "0a3123a6ce981075": "Logga in för att skicka aktivitet till mobilaviseringar och liveaktiviteter.",
   "c42a0de969f4133f": "Skicka aktivitet till mobilaviseringar och liveaktiviteter utan T3 Connect.",
   "5f8ca828eca1ce1a": "Publicera agentaktivitet till mobilklienter",
@@ -11588,7 +11583,7 @@
   "0c5fc3b5e41e1956": "genererade trådtitlar prompt anpassad stil namngivning byt namn generera om",
   "a83570bcb45d8fa1": "om sök efter uppdateringar ladda ner installera uppgradera version",
   "d65bdf6748801734": "versionskanal stabil latest nightly förhandsversion",
-  "0767c794edea8f03": "Kommandot t3",
+  "e82d2d3e0d5b1711": "Kommandot cove",
   "46dd4dc08c1e552f": "cli terminal skal sökväg installera kommandorad",
   "86479042bae0e2db": "Mobilapp",
   "dc2a999ca67ccf31": "telefon surfplatta iPhone iPad iOS Android App Store Google Play QR",

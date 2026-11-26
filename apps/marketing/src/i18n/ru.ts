@@ -30,10 +30,10 @@ export const ru: Messages = {
     downloadForIos: "Скачать для iOS",
     downloadForAndroid: "Скачать для Android",
     sourceLink: "Украдите наш код (легально)",
-    alsoOnPhone: "Есть и для телефона:",
+    alsoOnPhone: "iOS и Android (сборка из исходного кода)",
     screenshotAlt: "Cove Code запускает субагентов Claude, Codex, Muse и Gemini в одном треде",
-    endorsementsTitle: "Более {users} разработчиков не против",
-    endorsementsSub: "Некоторые даже написали об этом в X.",
+    endorsementsTitle: "Форк T3 Code, которым пользуются более {users} разработчиков",
+    endorsementsSub: "Отзывы разработчиков об исходном проекте T3 Code.",
     endorsementsLabel: "Отзывы разработчиков",
     readPost: "Читать пост {handle} в X",
     harnessTitle: "Со своей подпиской",
@@ -78,7 +78,7 @@ export const ru: Messages = {
   download: {
     title: "Скачать Cove Code для macOS, Windows и Linux | Cove Code",
     description:
-      "Скачайте официальное десктопное приложение Cove Code для macOS, Windows или Linux либо приложения для iOS и Android. Единственный официальный сайт для загрузки: t3.codes.",
+      "Скачайте десктопное приложение Cove Code для macOS, Windows или Linux либо установите CLI из терминала.",
     breadcrumb: "Скачать",
     heading: "Скачать Cove Code",
     channelLabel: "Канал релизов",

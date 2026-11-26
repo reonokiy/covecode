@@ -45,7 +45,7 @@ export function T3ConnectSidebarSignIn() {
           <SidebarMenuButton onClick={openAuthPrompt}>
             <RotateCwIcon />
             <span>
-              <T>Retry T3 Connect</T>
+              <T>Retry sign-in</T>
             </span>
           </SidebarMenuButton>
         </SidebarMenuItem>
@@ -60,7 +60,7 @@ export function T3ConnectSidebarSignIn() {
         <SidebarMenuButton onClick={openAuthPrompt}>
           <LogInIcon />
           <span>
-            <T>Sign in to T3 Connect</T>
+            <T>Sign in</T>
           </span>
         </SidebarMenuButton>
       </SidebarMenuItem>

@@ -1489,7 +1489,7 @@
   "19eb7450f158369f": "No se pueden abrir enlaces.",
   "677242baa5ae4528": "Introduce una dirección HTTPS o usa HTTP en localhost.",
   "8849ba196ef38a12": "No se pudo iniciar la sesión. Comprueba la dirección del panel de control y vuelve a intentarlo.",
-  "6fa695d3a822bb9e": "Iniciar sesión en T3 Connect",
+  "ec21b232e0eacd4a": "Iniciar sesión",
   "c0596fc0c605682a": "Dirección del panel de control",
   "7ac4455553fe632a": "Continuar",
   "ef24f1aa3b4962b0": "No se pudo leer el estado del vínculo con T3 Connect.",
@@ -2152,25 +2152,24 @@
   "0e2f68b7c6915c72": "Abrir Entornos",
   "6b4bbecf3df324fa": "Reintentar inicio de sesión",
   "83be7aade7ff6360": "Sesión iniciada",
-  "ec21b232e0eacd4a": "Iniciar sesión",
   "665d27df5960e6b2": "Esperando a tu equipo…",
   "c65de112b48a66ed": "Añadir enlace de emparejamiento",
   "bc8ab792af1d656f": "Ejecuta en tu equipo:",
   "0ba14e4e920cfa00": "O descarga la app de escritorio",
   "0e79b7a6508a6286": "Después",
-  "363b9991fa23d36b": [
+  "60198db95161a516": [
     "Omite la instalación si ya tienes ",
     {
       "t": "code",
       "i": 1,
-      "c": "t3"
+      "c": "cove"
     },
     ". Si no se encuentra",
     " ",
     {
       "t": "code",
       "i": 2,
-      "c": "t3"
+      "c": "cove"
     },
     " después de instalarlo, añade a tu PATH la carpeta que indique el instalador."
   ],
@@ -2987,8 +2986,8 @@
   "62450481c00d2ef3": "El entorno del borrador no está disponible para limpiar la transcripción.",
   "c64cb58d9cecbcd2": "Falló la limpieza de la transcripción",
   "0674544195fcdc39": "Se añadió la transcripción original.",
-  "296496693cdac0db": "El comando t3 no está disponible.",
-  "efbcef7bc9bbda01": "No se pudo cargar el estado del comando t3.",
+  "d17444525c15387b": "El comando cove no está disponible.",
+  "5bff39e7eb9874cc": "No se pudo cargar el estado del comando cove.",
   "1bf6910332426e62": "El acceso a la red del escritorio no está disponible.",
   "453d2f1825d6e763": "No se pudo cargar el estado de exposición del servidor de escritorio.",
   "2f388f3d76869c03": "No se pudieron cargar los endpoints anunciados del escritorio.",
@@ -4946,7 +4945,6 @@
   "edaebeea1915f9c1": "Cuenta",
   "a656dc69a38a3639": "Sign out",
   "daf8daec701f0863": "Cuenta",
-  "cf09d31e268af127": "Reintentar T3 Connect",
   "b28a147f66b0e088": "Fecha de vinculación no disponible",
   "6f0589fb1a5e38a9": "Vinculado el {date}",
   "ba921b079703d6d5": "Túnel gestionado",
@@ -5888,6 +5886,7 @@
   "402ad504ab1fe6a4": "Vinculado: {environments}",
   "9ec433045537acfc": "Volver a comprobar",
   "88f60e3d23ebcdd8": "Comprobando T3 Connect…",
+  "6fa695d3a822bb9e": "Iniciar sesión en T3 Connect",
   "5492129175e04f8d": "Tu cuenta de T3 Connect se quedó sin túneles.",
   "27f1ee2a5a0e7d5c": [
     "Reinicia Cove Code en ",
@@ -6024,7 +6023,6 @@
   "bd2304f25f6f999e": "{selected, plural, one {{selected} de {total} seleccionado} other {{selected} de {total} seleccionados}}",
   "228cd9fd55a55070": "No se pudieron volver a comprobar los proyectos. {error}",
   "1cc599c5f5874014": "Teléfono",
-  "8d4b4b7072952366": "App de Cove Code para iPhone y Android",
   "431bee88ecc944e4": "Comprobar T3 Connect",
   "c747696796f64468": "T3 Connect está activado, pero la app no puede acceder a este equipo.",
   "96557a906f6167b9": "Sesión iniciada. Comparte este equipo para que la app pueda acceder a él.",
@@ -6109,7 +6107,7 @@
   "5c6a6009aedbf1d0": "Seleccionar todo",
   "24c98c5086b8e76e": "No seleccionar ninguno",
   "1282b693a6130b09": "Usa Cove Code en tu teléfono",
-  "37c66042ce1906da": "Escanéalo con tu teléfono para obtener la app.",
+  "c8cc67eac3023f31": "Compilar desde el código fuente",
   "1b4364ef89b07f35": "No se pudo comprobar T3 Connect.",
   "7b10d40dd15938e5": "Tu teléfono puede acceder a este equipo. Inicia sesión en la app con la misma cuenta.",
   "8330812e7b81f020": "T3 Connect está activado en este equipo. Inicia sesión en la app con la misma cuenta.",
@@ -6132,7 +6130,7 @@
     "en esta terminal."
   ],
   "9d9b9624c7bd95df": "Otras carpetas",
-  "1eb8f3d4695033fb": [
+  "26ff3bf845277d59": [
     "Añadido a ",
     {
       "i": 1,
@@ -6144,16 +6142,16 @@
     {
       "t": "code",
       "i": 2,
-      "c": "t3"
+      "c": "cove"
     },
     "."
   ],
-  "ad72bb102aa39c31": [
+  "c9548c9b39ea4108": [
     "Usa ",
     {
       "t": "code",
       "i": 1,
-      "c": "t3"
+      "c": "cove"
     },
     " desde cualquier terminal. Añade una línea a",
     " ",
@@ -7722,15 +7720,15 @@
       "v": "v"
     }
   ],
-  "d0e747ae0c4f68a5": "No se pudo instalar t3",
-  "ba3ac338f36cba74": "No se pudo quitar t3",
-  "9c942b53b58119b8": "No se pudo añadir t3 al PATH",
-  "543a976cc5696c5c": "Otro t3 en {path} se ejecuta primero en una terminal nueva. Quítalo para usar el de Cove Code.",
-  "743eac3fce0c736d": "Ejecuta la CLI de Cove Code como `t3` desde cualquier terminal.",
+  "874d0fd948f205ac": "No se pudo instalar cove",
+  "b7e80d77d09745d5": "No se pudo quitar cove",
+  "42d2287daa1d5ac7": "No se pudo añadir cove al PATH",
+  "6e3a9be4c8633ca2": "Otro cove en {path} se ejecuta primero en una terminal nueva. Quítalo para usar el de Cove Code.",
+  "e55702f8b1fe002e": "Ejecuta la CLI de Cove Code como `cove` desde cualquier terminal.",
   "4f6e93011ef2da6f": "Instalado en {path}. Abre una terminal nueva para usarlo.",
   "371ca438cf467125": "Instalado en {path} y añadido al PATH en {file}. Abre una terminal nueva para usarlo.",
   "fd3eece9d1a7ea38": "Instalado en {path}, que aún no está en tu PATH.",
-  "5fff98fa978bd008": "Instalado en {path}, que aún no está en tu PATH. Añade su carpeta a tu PATH para ejecutar `t3`.",
+  "9dceff74388303c8": "Instalado en {path}, que aún no está en tu PATH. Añade su carpeta a tu PATH para ejecutar `cove`.",
   "dc06294dd4078b00": "Quitar",
   "b707d919dbf0222a": "Instalar",
   "9a284b5893dc04a2": "Modelo de OpenRouter",
@@ -8698,7 +8696,7 @@
   "e1789f863205ad5a": "No se pudo vincular el entorno",
   "40cde51afa218290": "{label} vinculado",
   "eefe994332120d82": "Vincular",
-  "fb71127e5746a6bc": "Desde Compartir y acceso allí, o t3 pair",
+  "3d24e96a49cbd142": "Desde Compartir y acceso allí, o cove pair",
   "130e51beb6cf5aad": "Vincular un entorno",
   "122c3e355699e69d": "Así los agentes de aquí podrán iniciar hilos allí, enviarles mensajes y esperarlos. Aparece en Clientes autorizados, en Compartir y acceso de ese entorno, donde se puede revocar.",
   "dc9a0b68d101e904": "Ya está vinculado. Vincularlo de nuevo lo renueva con el acceso que elijas.",
@@ -8747,10 +8745,7 @@
   "0be6b2546df12f66": "Detener",
   "7dbd7e8943e8931f": "Abriendo micrófono…",
   "efa31f38b611e912": "No se pudo reproducir esta grabación. Vuelve a grabar.",
-  "0cebac0a2a6bdc99": "iPhone y iPad",
   "d797c9687a256a50": "Conéctate a tu servidor desde el teléfono o la tableta.",
-  "c21858dee1b62639": "Enlace de {store}",
-  "cdcdc54a444a3636": "Escanéalo con la cámara del teléfono.",
   "c9a68022f0fb840c": [
     "No recomendamos gestionar varias cuentas de ",
     {
@@ -9426,8 +9421,8 @@
   "ae3971c4379c262f": "T3 Connect está activado, pero otros dispositivos no pueden llegar a este entorno.",
   "8fddf21c28c34154": "T3 Connect está activado. Aún no se ha comprobado la accesibilidad.",
   "b2cf3dccd52f02ec": "T3 Connect no está sincronizado. Este entorno solo está vinculado para publicar la actividad de agentes, así que otros dispositivos no pueden conectarse. Activa T3 Connect para repararlo.",
-  "bf1a82ceb6a864f5": "Este entorno se quitó de T3 Connect. Ejecuta `t3 connect link` en el host para volver a vincularlo.",
-  "35e9516df892595b": "Ejecuta `t3 connect link` en el host y después reinicia Cove Code allí.",
+  "1475a9a304f78c98": "Este entorno se quitó de T3 Connect. Ejecuta `cove connect link` en el host para volver a vincularlo.",
+  "8a5179fbc4471bda": "Ejecuta `cove connect link` en el host y después reinicia Cove Code allí.",
   "0a3123a6ce981075": "Inicia sesión para enviar la actividad a las notificaciones móviles y a las Actividades en directo.",
   "c42a0de969f4133f": "Envía la actividad a las notificaciones móviles y a las Actividades en directo sin T3 Connect.",
   "5f8ca828eca1ce1a": "Publicar la actividad de agentes en los clientes móviles",
@@ -11575,7 +11570,7 @@
   "0c5fc3b5e41e1956": "títulos de hilos generados prompt estilo personalizado nombres renombrar regenerar",
   "a83570bcb45d8fa1": "acerca de buscar actualizaciones descargar instalar actualizar versión",
   "d65bdf6748801734": "canal de versiones estable latest nightly preliminar",
-  "0767c794edea8f03": "Comando t3",
+  "e82d2d3e0d5b1711": "Comando cove",
   "46dd4dc08c1e552f": "cli terminal shell ruta instalar línea de comandos",
   "86479042bae0e2db": "App móvil",
   "dc2a999ca67ccf31": "teléfono tableta iPhone iPad iOS Android App Store Google Play QR",

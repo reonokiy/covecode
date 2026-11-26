@@ -30,10 +30,10 @@ export const zh: Messages = {
     downloadForIos: "下载 iOS 版",
     downloadForAndroid: "下载 Android 版",
     sourceLink: "来偷我们的代码（合法地）",
-    alsoOnPhone: "手机上也能用：",
+    alsoOnPhone: "iOS 与 Android（从源码构建）",
     screenshotAlt: "Cove Code 在同一个线程中运行 Claude、Codex、Muse 和 Gemini 子智能体",
-    endorsementsTitle: "超过 {users} 名开发者觉得还行",
-    endorsementsSub: "有些人甚至发推夸了它。",
+    endorsementsTitle: "派生自超过 {users} 名开发者使用的 T3 Code",
+    endorsementsSub: "开发者们对上游 T3 Code 项目的评价。",
     endorsementsLabel: "开发者评价",
     readPost: "在 X 上阅读 {handle} 的帖子",
     harnessTitle: "自带订阅",
@@ -75,8 +75,7 @@ export const zh: Messages = {
   },
   download: {
     title: "下载 Cove Code：macOS、Windows 和 Linux 版 | Cove Code",
-    description:
-      "下载 Cove Code 官方桌面应用（macOS、Windows 或 Linux），或获取 iOS 和 Android 应用。t3.codes 是唯一的官方下载网站。",
+    description: "下载 Cove Code 桌面应用（macOS、Windows 或 Linux），或在终端安装 CLI。",
     breadcrumb: "下载",
     heading: "下载 Cove Code",
     channelLabel: "发布通道",

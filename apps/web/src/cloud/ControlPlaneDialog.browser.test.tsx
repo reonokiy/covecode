@@ -51,6 +51,9 @@ it("lets a signed-out user correct the panel address and continue with its sign-
   const address = page.getByRole("textbox", { name: "Control panel address" });
   const submit = page.getByRole("button", { name: "Continue" });
   await address.fill("http://cp.example.test");
+  await expect
+    .element(address)
+    .toHaveAccessibleDescription("Enter an HTTPS address, or use HTTP on localhost.");
   await expect.element(submit).toBeDisabled();
   expect(network).not.toHaveBeenCalled();
   await address.fill("https://unavailable.example.test");

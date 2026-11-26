@@ -62,12 +62,13 @@ export function useT3ConnectAccountPage(): {
               {m(msg("Sign out"))}
             </Button>
           </div>
-          <div className="flex min-h-80">
-            <nav className="flex w-44 shrink-0 flex-col gap-1 border-r p-2">
+          <div className="flex min-h-80 flex-col sm:flex-row">
+            <nav className="flex shrink-0 flex-row gap-1 border-b p-2 sm:w-44 sm:flex-col sm:border-r sm:border-b-0">
               {T3_CONNECT_ACCOUNT_PAGES.map((candidate) => (
                 <button
                   key={candidate.url}
                   type="button"
+                  aria-current={candidate.url === page ? "page" : undefined}
                   onClick={() => setPage(candidate.url)}
                   className={cn(
                     "flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted/60",

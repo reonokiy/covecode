@@ -30,11 +30,11 @@ export const ko: Messages = {
     downloadForIos: "iOS용 다운로드",
     downloadForAndroid: "Android용 다운로드",
     sourceLink: "코드 훔쳐 가기(합법적으로)",
-    alsoOnPhone: "휴대폰에서도:",
+    alsoOnPhone: "iOS 및 Android(소스에서 빌드)",
     screenshotAlt:
       "하나의 스레드에서 Claude, Codex, Muse, Gemini 서브에이전트를 실행 중인 Cove Code",
-    endorsementsTitle: "{users}명이 넘는 개발자가 나쁘지 않다고 합니다",
-    endorsementsSub: "몇몇은 트윗까지 했습니다.",
+    endorsementsTitle: "{users}명이 넘는 개발자가 사용하는 T3 Code에서 포크됨",
+    endorsementsSub: "업스트림 T3 Code 프로젝트에 대한 개발자들의 평가.",
     endorsementsLabel: "개발자 추천",
     readPost: "X에서 {handle}님의 게시물 읽기",
     harnessTitle: "쓰던 구독 그대로",
@@ -79,7 +79,7 @@ export const ko: Messages = {
   download: {
     title: "macOS, Windows, Linux용 Cove Code 다운로드 | Cove Code",
     description:
-      "macOS, Windows, Linux용 공식 Cove Code 데스크톱 앱을 다운로드하거나 iOS 및 Android 앱을 받으세요. 공식 다운로드 사이트는 t3.codes뿐입니다.",
+      "macOS, Windows, Linux용 Cove Code 데스크톱 앱을 다운로드하거나 터미널에서 CLI를 설치하세요.",
     breadcrumb: "다운로드",
     heading: "Cove Code 다운로드",
     channelLabel: "릴리스 채널",

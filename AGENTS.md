@@ -139,6 +139,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
   ```
 
 - User-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers.
+- For every Cove change that affects what users see or how they interact with a client or the website, ask Gemini to review the UI and UX. Give Gemini the changed flows and available screenshots, and have it fix the issues it confirms. Verify those fixes in the affected surfaces.
 
 - Real agent turns cost money. To watch a turn stream through the pipeline and UI, use the free `Replay (dev)` provider that `vp run dev` registers; [test-t3-app](.agents/skills/test-t3-app/SKILL.md) shows how to start one. Use a real provider only when the change depends on that provider's behavior, and then pick its cheapest model, such as Haiku for Claude or Luna for Codex.
 

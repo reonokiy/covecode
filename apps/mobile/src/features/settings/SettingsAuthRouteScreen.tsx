@@ -4,13 +4,14 @@ import * as AuthSession from "expo-auth-session";
 import { useGT } from "gt-react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View } from "react-native";
 
-import { AppTextInput } from "../../components/ui/AppText";
+import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { useMobileCloudAuth } from "../cloud/useMobileCloudAuth";
 import { T3ConnectProfilePage } from "../cloud/T3ConnectProfilePage";
+import { SettingsScreen } from "./components/SettingsScreen";
 
 export function SettingsAuthRouteScreen() {
   const { isLoaded, isSignedIn, user, signIn, signOut } = useMobileCloudAuth();
@@ -29,22 +30,22 @@ export function SettingsAuthRouteScreen() {
 
   if (!isLoaded) return null;
 
-  if (!isSignedIn) {
-    return <ControlPlaneSignIn signIn={signIn} />;
-  }
-
   return (
-    <View style={styles.container}>
-      {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
-      <T3ConnectProfilePage />
-      <TouchableOpacity
-        style={[styles.button, styles.signOutButton]}
-        onPress={() => void signOut()}
-        accessibilityRole="button"
-      >
-        <Text style={styles.buttonText}>{gt("Sign out")}</Text>
-      </TouchableOpacity>
-    </View>
+    <SettingsScreen title={gt("Account")}>
+      {!isSignedIn ? (
+        <ControlPlaneSignIn signIn={signIn} />
+      ) : (
+        <View className="flex-1">
+          {user?.email ? (
+            <Text className="px-6 pt-3 pb-1 text-sm text-foreground-muted">{user.email}</Text>
+          ) : null}
+          <T3ConnectProfilePage />
+          <View className="px-6 py-4">
+            <Button label={gt("Sign out")} tone="danger" fullWidth onPress={() => void signOut()} />
+          </View>
+        </View>
+      )}
+    </SettingsScreen>
   );
 }
 
@@ -72,8 +73,8 @@ function ControlPlaneSignIn({
     setBusy(false);
   }
   return (
-    <View style={styles.container} className="gap-3">
-      <Text className="text-foreground">{gt("Control panel address")}</Text>
+    <View className="flex-1 gap-3 px-5 pt-4">
+      <Text className="text-sm font-t3-medium text-foreground">{gt("Control panel address")}</Text>
       <AppTextInput
         accessibilityLabel={gt("Control panel address")}
         placeholder="https://cp.example.com"
@@ -89,17 +90,19 @@ function ControlPlaneSignIn({
         onSubmitEditing={submit}
       />
       {address.trim().length > 0 && !normalizeSecureRelayUrl(address) && (
-        <Text className="text-foreground-muted">
+        <Text className="text-xs text-foreground-muted">
           {gt("Enter an HTTPS address, or use HTTP on localhost.")}
         </Text>
       )}
       {error && (
-        <Text accessibilityRole="alert" className="text-destructive">
+        <Text accessibilityRole="alert" className="text-xs text-destructive">
           {gt("Could not start sign-in. Check the control panel address and try again.")}
         </Text>
       )}
       <Button
-        label={gt("Sign in to T3 Connect")}
+        label={gt("Sign in")}
+        tone="primary"
+        fullWidth
         loading={busy}
         disabled={!normalizeSecureRelayUrl(address)}
         onPress={submit}
@@ -107,17 +110,3 @@ function ControlPlaneSignIn({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
-  email: { fontSize: 14, color: "#666", marginBottom: 8 },
-  button: {
-    backgroundColor: "#0066cc",
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
-    marginTop: 16,
-  },
-  signOutButton: { backgroundColor: "#cc0000", marginTop: 24 },
-  buttonText: { color: "#fff", fontWeight: "600" },
-});

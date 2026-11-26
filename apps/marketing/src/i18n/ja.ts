@@ -30,11 +30,11 @@ export const ja: Messages = {
     downloadForIos: "iOS 版をダウンロード",
     downloadForAndroid: "Android 版をダウンロード",
     sourceLink: "コードを盗もう（合法的に）",
-    alsoOnPhone: "スマホでも使えます：",
+    alsoOnPhone: "iOS・Android（ソースからビルド）",
     screenshotAlt:
       "ひとつのスレッドで Claude、Codex、Muse、Gemini のサブエージェントを動かす Cove Code",
-    endorsementsTitle: "{users}人以上の開発者たちが「悪くない」と言っています",
-    endorsementsSub: "温かいツイートまでいただいています。",
+    endorsementsTitle: "{users}人以上の開発者に使われる T3 Code から派生",
+    endorsementsSub: "アップストリームの T3 Code に対する開発者の声。",
     endorsementsLabel: "開発者の声",
     readPost: "X で {handle} の投稿を読む",
     harnessTitle: "サブスクは持ち込みで",
@@ -82,7 +82,7 @@ export const ja: Messages = {
   download: {
     title: "Cove Code をダウンロード（macOS、Windows、Linux）| Cove Code",
     description:
-      "公式の Cove Code デスクトップアプリ（macOS、Windows、Linux）や、iOS・Android アプリをダウンロードできます。公式のダウンロードサイトは t3.codes だけです。",
+      "Cove Code デスクトップアプリ（macOS、Windows、Linux）をダウンロードするか、ターミナルから CLI をインストールできます。",
     breadcrumb: "ダウンロード",
     heading: "Cove Code をダウンロード",
     channelLabel: "リリースチャンネル",

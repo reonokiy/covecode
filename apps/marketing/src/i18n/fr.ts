@@ -30,11 +30,11 @@ export const fr: Messages = {
     downloadForIos: "Télécharger pour iOS",
     downloadForAndroid: "Télécharger pour Android",
     sourceLink: "Volez notre code (légalement)",
-    alsoOnPhone: "Aussi sur votre téléphone :",
+    alsoOnPhone: "iOS et Android (compiler depuis les sources)",
     screenshotAlt:
       "Cove Code exécutant des sous-agents Claude, Codex, Muse et Gemini dans un même fil",
-    endorsementsTitle: "Toléré par plus de {users} devs",
-    endorsementsSub: "Certains en ont même dit du bien sur X.",
+    endorsementsTitle: "Dérivé de T3 Code, utilisé par plus de {users} devs",
+    endorsementsSub: "Ce que les développeurs disent du projet amont T3 Code.",
     endorsementsLabel: "Avis de développeurs",
     readPost: "Lire le post de {handle} sur X",
     harnessTitle: "Apportez votre abonnement",
@@ -82,7 +82,7 @@ export const fr: Messages = {
   download: {
     title: "Télécharger Cove Code pour macOS, Windows et Linux | Cove Code",
     description:
-      "Téléchargez l'app de bureau officielle Cove Code pour macOS, Windows ou Linux, ou les apps iOS et Android. t3.codes est le seul site de téléchargement officiel.",
+      "Téléchargez Cove Code pour macOS, Windows ou Linux, ou installez le CLI depuis le terminal.",
     breadcrumb: "Télécharger",
     heading: "Télécharger Cove Code",
     channelLabel: "Canal de publication",

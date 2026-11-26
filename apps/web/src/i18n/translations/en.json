@@ -1489,7 +1489,7 @@
   "19eb7450f158369f": "Link opening is unavailable.",
   "677242baa5ae4528": "Enter an HTTPS address, or use HTTP on localhost.",
   "8849ba196ef38a12": "Could not start sign-in. Check the control panel address and try again.",
-  "6fa695d3a822bb9e": "Sign in to T3 Connect",
+  "ec21b232e0eacd4a": "Sign in",
   "c0596fc0c605682a": "Control panel address",
   "7ac4455553fe632a": "Continue",
   "ef24f1aa3b4962b0": "Could not read T3 Connect link state.",
@@ -2152,25 +2152,24 @@
   "0e2f68b7c6915c72": "Open Environments",
   "6b4bbecf3df324fa": "Retry sign-in",
   "83be7aade7ff6360": "Signed in",
-  "ec21b232e0eacd4a": "Sign in",
   "665d27df5960e6b2": "Waiting for your computer…",
   "c65de112b48a66ed": "Add pairing link",
   "bc8ab792af1d656f": "Run on your computer:",
   "0ba14e4e920cfa00": "Or download the desktop app",
   "0e79b7a6508a6286": "Then",
-  "363b9991fa23d36b": [
+  "60198db95161a516": [
     "Skip the install if you already have ",
     {
       "t": "code",
       "i": 1,
-      "c": "t3"
+      "c": "cove"
     },
     ". If",
     " ",
     {
       "t": "code",
       "i": 2,
-      "c": "t3"
+      "c": "cove"
     },
     " is not found after installing, add the folder the installer names to your PATH."
   ],
@@ -2987,8 +2986,8 @@
   "62450481c00d2ef3": "The draft's environment is unavailable for transcript cleanup.",
   "c64cb58d9cecbcd2": "Transcript cleanup failed",
   "0674544195fcdc39": "The original transcript was added.",
-  "296496693cdac0db": "The t3 command is unavailable.",
-  "efbcef7bc9bbda01": "Failed to load the t3 command state.",
+  "d17444525c15387b": "The cove command is unavailable.",
+  "5bff39e7eb9874cc": "Failed to load the cove command state.",
   "1bf6910332426e62": "Desktop network access is unavailable.",
   "453d2f1825d6e763": "Failed to load desktop server exposure state.",
   "2f388f3d76869c03": "Failed to load advertised desktop endpoints.",
@@ -4948,7 +4947,6 @@
   "edaebeea1915f9c1": "Account",
   "a656dc69a38a3639": "Sign out",
   "daf8daec701f0863": "Account",
-  "cf09d31e268af127": "Retry T3 Connect",
   "b28a147f66b0e088": "Link date unavailable",
   "6f0589fb1a5e38a9": "Linked {date}",
   "ba921b079703d6d5": "Managed tunnel",
@@ -5890,6 +5888,7 @@
   "402ad504ab1fe6a4": "Linked: {environments}",
   "9ec433045537acfc": "Check again",
   "88f60e3d23ebcdd8": "Checking T3 Connect…",
+  "6fa695d3a822bb9e": "Sign in to T3 Connect",
   "5492129175e04f8d": "Your T3 Connect account is out of tunnels.",
   "27f1ee2a5a0e7d5c": [
     "Restart Cove Code on ",
@@ -6026,7 +6025,6 @@
   "bd2304f25f6f999e": "{selected, plural, one {{selected} of {total} selected} other {{selected} of {total} selected}}",
   "228cd9fd55a55070": "Could not check projects again. {error}",
   "1cc599c5f5874014": "Phone",
-  "8d4b4b7072952366": "Cove Code app for iPhone and Android",
   "431bee88ecc944e4": "Check T3 Connect",
   "c747696796f64468": "T3 Connect is on, but the app cannot reach this computer.",
   "96557a906f6167b9": "Signed in. Share this computer so the app can reach it.",
@@ -6112,7 +6110,7 @@
   "5c6a6009aedbf1d0": "Select all",
   "24c98c5086b8e76e": "Select none",
   "1282b693a6130b09": "Use Cove Code on your phone",
-  "37c66042ce1906da": "Scan with your phone to get the app.",
+  "c8cc67eac3023f31": "Build from source",
   "1b4364ef89b07f35": "Could not check T3 Connect.",
   "7b10d40dd15938e5": "Your phone can reach this computer. Sign in to the app with the same account.",
   "8330812e7b81f020": "T3 Connect is on for this computer. Sign in to the app with the same account.",
@@ -6135,7 +6133,7 @@
     "in this terminal."
   ],
   "9d9b9624c7bd95df": "Other folders",
-  "1eb8f3d4695033fb": [
+  "26ff3bf845277d59": [
     "Added to ",
     {
       "i": 1,
@@ -6147,16 +6145,16 @@
     {
       "t": "code",
       "i": 2,
-      "c": "t3"
+      "c": "cove"
     },
     "."
   ],
-  "ad72bb102aa39c31": [
+  "c9548c9b39ea4108": [
     "Use ",
     {
       "t": "code",
       "i": 1,
-      "c": "t3"
+      "c": "cove"
     },
     " from any terminal. Adds one line to",
     " ",
@@ -7730,15 +7728,15 @@
       "v": "v"
     }
   ],
-  "d0e747ae0c4f68a5": "Could not install t3",
-  "ba3ac338f36cba74": "Could not remove t3",
-  "9c942b53b58119b8": "Could not add t3 to PATH",
-  "543a976cc5696c5c": "Another t3 at {path} runs first in a new terminal. Remove it to use Cove Code's.",
-  "743eac3fce0c736d": "Run Cove Code's CLI as `t3` from any terminal.",
+  "874d0fd948f205ac": "Could not install cove",
+  "b7e80d77d09745d5": "Could not remove cove",
+  "42d2287daa1d5ac7": "Could not add cove to PATH",
+  "6e3a9be4c8633ca2": "Another cove at {path} runs first in a new terminal. Remove it to use Cove Code's.",
+  "e55702f8b1fe002e": "Run Cove Code's CLI as `cove` from any terminal.",
   "4f6e93011ef2da6f": "Installed at {path}. Open a new terminal to use it.",
   "371ca438cf467125": "Installed at {path} and added to PATH in {file}. Open a new terminal to use it.",
   "fd3eece9d1a7ea38": "Installed at {path}, which is not on your PATH yet.",
-  "5fff98fa978bd008": "Installed at {path}, which is not on your PATH yet. Add its folder to your PATH to run `t3`.",
+  "9dceff74388303c8": "Installed at {path}, which is not on your PATH yet. Add its folder to your PATH to run `cove`.",
   "dc06294dd4078b00": "Remove",
   "b707d919dbf0222a": "Install",
   "9a284b5893dc04a2": "OpenRouter model",
@@ -8708,7 +8706,7 @@
   "e1789f863205ad5a": "Could not link the environment",
   "40cde51afa218290": "Linked {label}",
   "eefe994332120d82": "Link",
-  "fb71127e5746a6bc": "From Sharing & access there, or t3 pair",
+  "3d24e96a49cbd142": "From Sharing & access there, or cove pair",
   "130e51beb6cf5aad": "Link an environment",
   "122c3e355699e69d": "Agents here can then launch, message and wait on threads there. It appears under Authorized clients in that environment's Sharing & access, where it can be revoked.",
   "dc9a0b68d101e904": "Already linked. Linking again renews it with the access you pick.",
@@ -8757,10 +8755,7 @@
   "0be6b2546df12f66": "Stop",
   "7dbd7e8943e8931f": "Opening microphone…",
   "efa31f38b611e912": "Could not play this recording. Try recording again.",
-  "0cebac0a2a6bdc99": "iPhone and iPad",
   "d797c9687a256a50": "Connect to your server from your phone or tablet.",
-  "c21858dee1b62639": "{store} link",
-  "cdcdc54a444a3636": "Scan with your phone camera.",
   "c9a68022f0fb840c": [
     "We do not recommend managing multiple ",
     {
@@ -9438,8 +9433,8 @@
   "ae3971c4379c262f": "T3 Connect is on, but other devices cannot reach this environment.",
   "8fddf21c28c34154": "T3 Connect is on. Reachability has not been checked yet.",
   "b2cf3dccd52f02ec": "T3 Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn T3 Connect on to repair it.",
-  "bf1a82ceb6a864f5": "This environment was removed from T3 Connect. Run `t3 connect link` on the host to link it again.",
-  "35e9516df892595b": "Run `t3 connect link` on the host, then restart Cove Code there.",
+  "1475a9a304f78c98": "This environment was removed from T3 Connect. Run `cove connect link` on the host to link it again.",
+  "8a5179fbc4471bda": "Run `cove connect link` on the host, then restart Cove Code there.",
   "0a3123a6ce981075": "Sign in to send activity to mobile notifications and Live Activities.",
   "c42a0de969f4133f": "Send activity to mobile notifications and Live Activities without T3 Connect.",
   "5f8ca828eca1ce1a": "Publish agent activity to mobile clients",
@@ -11590,7 +11585,7 @@
   "0c5fc3b5e41e1956": "generated thread titles prompt custom style naming rename regenerate",
   "a83570bcb45d8fa1": "about check for updates download install upgrade release",
   "d65bdf6748801734": "release channel stable latest nightly prerelease",
-  "0767c794edea8f03": "t3 command",
+  "e82d2d3e0d5b1711": "cove command",
   "46dd4dc08c1e552f": "cli terminal shell path install command line",
   "86479042bae0e2db": "Mobile app",
   "dc2a999ca67ccf31": "phone tablet iPhone iPad iOS Android App Store Google Play QR",

@@ -45,7 +45,14 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button, InlineButton } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
 import {
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
@@ -770,13 +777,13 @@ function ConfiguredCloudLinkRow({
         <SettingsRow
           title={setting("t3-connect").title}
           description={gt(
-            "This environment was removed from T3 Connect. Run `t3 connect link` on the host to link it again.",
+            "This environment was removed from T3 Connect. Run `cove connect link` on the host to link it again.",
           )}
         />
       ) : (
         <SettingsRow
           title={setting("t3-connect").title}
-          description={gt("Run `t3 connect link` on the host, then restart Cove Code there.")}
+          description={gt("Run `cove connect link` on the host, then restart Cove Code there.")}
         />
       )}
       {signedOut && showSwitch ? null : (
@@ -887,7 +894,13 @@ export function CloudLinkRow({
   );
 }
 
-function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
+function EmptyRemoteEnvironments({
+  cloudEnabled = true,
+  action,
+}: {
+  readonly cloudEnabled?: boolean;
+  readonly action?: React.ReactNode;
+}) {
   const gt = useGT();
   return (
     <Empty className="min-h-52">
@@ -906,6 +919,7 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
             : gt("Click “Add environment” to pair another environment.")}
         </EmptyDescription>
       </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
     </Empty>
   );
 }
@@ -917,19 +931,22 @@ export function CloudRemoteEnvironmentRows({
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
 }) {
+  const gt = useGT();
   const { openAuthPrompt } = useCloudAuthPrompt();
+  const signInButton = (
+    <Button variant="outline" size="sm" onClick={openAuthPrompt}>
+      <T>Sign in</T>
+    </Button>
+  );
   return hasCloudPublicConfig() ? (
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
       empty={<EmptyRemoteEnvironments />}
     />
+  ) : savedEnvironments.length === 0 ? (
+    <EmptyRemoteEnvironments cloudEnabled={false} action={signInButton} />
   ) : (
-    <>
-      {savedEnvironments.length === 0 && <EmptyRemoteEnvironments cloudEnabled={false} />}
-      <Button variant="outline" size="sm" onClick={openAuthPrompt}>
-        <T>Sign in to T3 Connect</T>
-      </Button>
-    </>
+    <SettingsRow title={gt("Account")} control={signInButton} />
   );
 }

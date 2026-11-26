@@ -30,10 +30,10 @@ export const en = {
     downloadForIos: "Download for iOS",
     downloadForAndroid: "Download for Android",
     sourceLink: "Steal our code (legally)",
-    alsoOnPhone: "Also on your phone:",
+    alsoOnPhone: "iOS & Android (build from source)",
     screenshotAlt: "Cove Code running Claude, Codex, Muse, and Gemini subagents in one thread",
-    endorsementsTitle: "Tolerated by over {users} devs",
-    endorsementsSub: "Some of them even tweeted about it.",
+    endorsementsTitle: "Forked from T3 Code, used by over {users} devs",
+    endorsementsSub: "What developers say about the upstream T3 Code project.",
     endorsementsLabel: "Developer endorsements",
     readPost: "Read {handle}'s post on X",
     harnessTitle: "Bring your own sub",
@@ -78,7 +78,7 @@ export const en = {
   download: {
     title: "Download Cove Code for macOS, Windows, and Linux | Cove Code",
     description:
-      "Download the official Cove Code desktop app for macOS, Windows, or Linux, or get the iOS and Android apps. t3.codes is the only official download site.",
+      "Download Cove Code for macOS, Windows, or Linux, or install the CLI from the terminal.",
     breadcrumb: "Download",
     heading: "Download Cove Code",
     channelLabel: "Release channel",

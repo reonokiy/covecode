@@ -1,7 +1,6 @@
-const REPO = "pingdotgg/t3code";
+const REPO = "reonokiy/covecode";
 
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
-export const NIGHTLY_RELEASES_URL = `${RELEASES_URL}?q=nightly&expanded=true`;
 
 const LATEST_API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 // GitHub's latest endpoint excludes prereleases; the newest nightly comes from the ordered release list.
@@ -22,7 +21,7 @@ export interface Release {
 }
 
 function cacheKey(channel: ReleaseChannel) {
-  return `t3code-${channel}-release`;
+  return `covecode-${channel}-release`;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
