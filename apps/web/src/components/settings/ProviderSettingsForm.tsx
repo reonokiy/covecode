@@ -105,6 +105,7 @@ function fieldAcceptsString(
 const PACKAGE_FIELD_TEXT: ReadonlyMap<string, string> = new Map([
   ["Binary path", msg("Binary path")],
   ["CODEX_HOME path", msg("CODEX_HOME path")],
+  ["TRAE_HOME path", msg("TRAE_HOME path")],
   ["Shadow home path", msg("Shadow home path")],
   ["Launch arguments", msg("Launch arguments")],
   ["CLAUDE_CONFIG_DIR path", msg("CLAUDE_CONFIG_DIR path")],
@@ -129,6 +130,15 @@ const PACKAGE_FIELD_TEXT: ReadonlyMap<string, string> = new Map([
     msg("Path to the Codex binary used by this instance."),
   ],
   ["Custom Codex home and config directory.", msg("Custom Codex home and config directory.")],
+  [
+    "Path to the TRAE CLI binary used by this instance.",
+    msg("Path to the TRAE CLI binary used by this instance."),
+  ],
+  ["Custom TRAE CLI home and config directory.", msg("Custom TRAE CLI home and config directory.")],
+  [
+    "Additional CLI arguments passed to traecli app-server on session start.",
+    msg("Additional CLI arguments passed to traecli app-server on session start."),
+  ],
   [
     "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
     msg(

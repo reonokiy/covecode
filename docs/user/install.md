@@ -206,6 +206,7 @@ computer.
 | Antigravity | Install and sign in with Google from T3 Code's provider settings.                                                                                         |
 | Pi          | Install [Pi](./providers-pi.md#set-up-pi) with Node.js 22.19 or newer, then run `pi` and `/login`.                                                        |
 | Muse Code   | Install [Muse Code](https://dev.meta.ai/docs/muse-code) on the server, run `muse login`, then enable it in Settings → Providers.                          |
+| TRAE CLI    | Install TRAE CLI on the server, run `traecli login`, then add a TRAE CLI instance in Settings → Providers.                                                |
 | fx          | Install [fx](https://fx.sh) with `curl -fsSL https://fx.sh/setup.sh \| bash`, then run `fx login`.                                                        |
 
 Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set its
@@ -213,6 +214,11 @@ Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set it
 Cursor's executable is `cursor-agent`, although its login command is
 `agent login`. Codex connected through ChatGPT and Antigravity can use their
 managed runtimes without a `PATH` entry.
+
+TRAE CLI uses its native app-server connection, not ACP. It reads your existing
+TRAE login and models. To use another account or configuration, set **TRAE_HOME
+path** on that provider instance and sign in with `TRAE_HOME` set to the same
+directory. Update the CLI with `traecli update` on the server's machine.
 
 T3 Code warns when a provider version has known compatibility problems with your
 release. Check **Settings → Providers** on that environment for the recommended
@@ -281,6 +287,7 @@ greater than 2147483647; unset or invalid values keep the defaults.
 | fx                  | `T3CODE_FX_PROBE_TIMEOUT_MS`           |
 | Pi                  | `T3CODE_PI_PROBE_TIMEOUT_MS`           |
 | Muse Code           | `T3CODE_MUSE_PROBE_TIMEOUT_MS`         |
+| TRAE CLI            | `T3CODE_TRAECLI_PROBE_TIMEOUT_MS`      |
 | OpenCode            | `T3CODE_OPENCODE_PROBE_TIMEOUT_MS`     |
 | ACP Registry agents | `T3CODE_ACP_REGISTRY_PROBE_TIMEOUT_MS` |
 

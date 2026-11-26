@@ -129,6 +129,20 @@ it("captures only the dev runner and preserves its exit status", () => {
     expect(NodeFS.readdirSync(output).sort()).toEqual(
       ["cpuprofile", "modules.json", "process.json"].map((suffix) => `${runner.pid}-0.${suffix}`),
     );
+    NodeChildProcess.execFileSync(
+      process.execPath,
+      [NodePath.join(import.meta.dirname, "profile-startup.mjs")],
+      {
+        cwd: directory,
+        env: { ...process.env, NODE_OPTIONS: "", T3CODE_STARTUP_PROFILE_DIR: undefined },
+      },
+    );
+    const captures = NodeFS.readdirSync(NodePath.join(directory, ".cove/startup-profiles"));
+    expect(captures).toHaveLength(1);
+    expect(
+      NodeFS.readdirSync(NodePath.join(directory, ".cove/startup-profiles", captures[0]!)),
+    ).toHaveLength(3);
+    expect(NodeFS.existsSync(NodePath.join(directory, ".t3"))).toBe(false);
     NodeFS.writeFileSync(
       NodePath.join(directory, "scripts/dev-runner.ts"),
       "process.kill(process.pid, 'SIGTERM');",

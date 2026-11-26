@@ -780,7 +780,7 @@ export const runDevRunnerWithInput = Effect.fn("dev-runner.runDevRunnerWithInput
 
   const hostEnvironment = yield* HostProcess.Environment;
   // A dev server started inside a worktree defaults to that worktree's own
-  // (gitignored) `.t3` — see @t3tools/shared/devHome for why this must
+  // (gitignored) `.cove` — see @t3tools/shared/devHome for why this must
   // outrank an ambient T3CODE_HOME. `--home-dir` still wins.
   const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcess.WorkingDirectory);
   // Trim before choosing: `--home-dir ""` is not a selection, and treating it
@@ -975,7 +975,7 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   t3Home: Flag.String("home-dir").pipe(
     Flag.withDescription(
-      "Explicit Cove Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME). Inside a git worktree this defaults to that worktree's own .t3 so dev state stays off the shared home.",
+      "Explicit Cove Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME). Inside a git worktree this defaults to that worktree's own .cove so dev state stays off the shared home.",
     ),
     Flag.optional,
     Flag.map(Option.getOrUndefined),
@@ -1030,7 +1030,7 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   seed: Flag.Boolean("seed").pipe(
     Flag.withDescription(
-      "Seed an empty worktree database from ~/.t3 on first start (read-only, via migrate-dev-db) if the source is at most 500 MiB. On by default; --no-seed or T3CODE_DEV_SEED=0 skips it.",
+      "Seed an empty worktree database from ~/.cove on first start (read-only, via migrate-dev-db) if the source is at most 500 MiB. On by default; --no-seed or T3CODE_DEV_SEED=0 skips it.",
     ),
     Flag.withFallbackConfig(optionalBooleanConfig("T3CODE_DEV_SEED")),
   ),

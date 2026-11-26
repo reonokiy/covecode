@@ -20,6 +20,7 @@ import {
 import { makeChildStdio, makeStderrTail, makeTerminationError } from "./_internal/stdio.ts";
 
 export interface CodexAppServerClientOptions {
+  readonly normalizeIncomingPayload?: (method: string, payload: unknown) => unknown;
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (
@@ -189,7 +190,12 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     const handlers = notificationHandlers.get(notification.method) ?? [];
 
     if (schema) {
-      return decodeNotificationPayload(notification.method, schema, notification.params).pipe(
+      return decodeNotificationPayload(
+        notification.method,
+        schema,
+        options.normalizeIncomingPayload?.(notification.method, notification.params) ??
+          notification.params,
+      ).pipe(
         Effect.tapError(warnUndecodableNotification),
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
@@ -246,7 +252,12 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         ): Effect.Effect<
           CodexRpc.ClientRequestResponsesByMethod[M],
           CodexError.CodexAppServerError
-        > => decodeOptionalPayload(method, getClientRequestResponseSchema(method), raw),
+        > =>
+          decodeOptionalPayload(
+            method,
+            getClientRequestResponseSchema(method),
+            options.normalizeIncomingPayload?.(method, raw) ?? raw,
+          ),
       ),
     );
 

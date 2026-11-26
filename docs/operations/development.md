@@ -59,26 +59,26 @@ Running `vp run dev` through an agent's own shell tool does not attach it to thi
 
 ### State and ports
 
-Linked worktrees default to their own `.t3/userdata`, even when `T3CODE_HOME` is set.
+Linked worktrees default to their own `.cove/userdata`, even when `T3CODE_HOME` is set.
 Any other checkout, including the main checkout and every plain `git clone`, uses
-`T3CODE_HOME` when it is set and otherwise `~/.t3/dev`, with default ports. Checkouts on
-`~/.t3/dev` share one database, settings, and secrets, and only one of their servers can run
+`T3CODE_HOME` when it is set and otherwise `~/.cove/dev`, with default ports. Checkouts on
+`~/.cove/dev` share one database, settings, and secrets, and only one of their servers can run
 at a time. An explicit `--home-dir` wins in both cases. It and `T3CODE_HOME` store state in
 `<home>/userdata`.
-A home of `~/.t3`, from either source, still selects `~/.t3/dev`, because `~/.t3/userdata` is
+A home of `~/.cove`, from either source, still selects `~/.cove/dev`, because `~/.cove/userdata` is
 the live install.
 The first start in a worktree seeds its empty database from a read-only copy of
-`~/.t3/userdata/statev2.sqlite` if the source is at most 500 MiB. Larger sources warn
+`~/.cove/userdata/statev2.sqlite` if the source is at most 500 MiB. Larger sources warn
 and dev starts with an empty database. `--no-seed` or `T3CODE_DEV_SEED=0` skips seeding.
-Seeding targets only a worktree's own `.t3`, so a plain clone or a `--home-dir` outside the
+Seeding targets only a worktree's own `.cove`, so a plain clone or a `--home-dir` outside the
 worktree starts empty. To give a clone its own seeded state, run
-`vp run migrate-dev-db --base-dir <clone>/.t3` and then `vp run dev --home-dir <clone>/.t3`.
+`vp run migrate-dev-db --base-dir <clone>/.cove` and then `vp run dev --home-dir <clone>/.cove`.
 To copy a larger source, run `vp run migrate-dev-db` with dev stopped. It may use
 substantial disk space before pruning.
 The first start in any checkout also builds the native resource monitor with Cargo when
 `native/resource-monitor/target` has no binary. Without Rust, dev starts with a warning
 and no process telemetry; install Rust and run `vp run build:resource-monitor`.
-Never run a development server against the live `~/.t3/userdata`.
+Never run a development server against the live `~/.cove/userdata`.
 See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
 
 Read ports from the `[dev-runner]` output. Worktrees derive stable preferences from their paths,
@@ -101,7 +101,7 @@ and vendor frames, so Grok and fx recordings lose their vendor-only behavior.
 ### Profiling dev startup
 
 Run `vp run profile:startup` to capture the first 20 seconds of inherited Node processes under
-`.t3/startup-profiles/<timestamp>`. Workers that execute the preload get separate profiles.
+`.cove/startup-profiles/<timestamp>`. Workers that execute the preload get separate profiles.
 It starts the normal dev runner and accepts its flags.
 Stop it with Ctrl+C after the capture. Set `T3CODE_STARTUP_PROFILE_DIR` to choose another output
 directory. Profiling adds overhead, so compare readiness with an ordinary `vp run dev` run.
@@ -112,7 +112,7 @@ synchronous subprocess calls, and startup measures. Per-file records include imp
 source loading, preparation, recursive dependency linking, and top-level evaluation. Preparation
 uses synchronous loader boundaries; linking includes dependencies, and CommonJS evaluation can
 include nested `require` calls. Some ESM/CommonJS interop reports a combined stage. `.process.json` records the process, Node version, and capture window.
-The server's nested Effect and SQL spans remain in `.t3/userdata/logs/server.trace.ndjson`.
+The server's nested Effect and SQL spans remain in `.cove/userdata/logs/server.trace.ndjson`.
 
 The preload temporarily adds module-body timing markers and uses one automatic debugger pause
 to instrument the live Node loader. The launcher adds `--no-node-snapshot` to inherited

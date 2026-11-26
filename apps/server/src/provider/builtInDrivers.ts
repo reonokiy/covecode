@@ -5,6 +5,7 @@ import {
 import { AntigravityDriver, type AntigravityDriverEnv } from "./Drivers/AntigravityDriver.ts";
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
+import { TraeCliDriver, type TraeCliDriverEnv } from "./Drivers/TraeCliDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@t3tools/provider-cursor/server";
 import { FxDriver, type FxDriverEnv } from "@t3tools/provider-fx/server";
 import { GrokDriver, type GrokDriverEnv } from "@t3tools/provider-grok/server";
@@ -22,6 +23,7 @@ export type BuiltInDriversEnv =
   | AntigravityDriverEnv
   | ClaudeDriverEnv
   | CodexDriverEnv
+  | TraeCliDriverEnv
   | CursorDriverEnv
   | FxDriverEnv
   | GrokDriverEnv
@@ -32,6 +34,7 @@ export type BuiltInDriversEnv =
 
 export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv>> = [
   CodexDriver,
+  TraeCliDriver,
   ClaudeDriver,
   CursorDriver,
   GrokDriver,

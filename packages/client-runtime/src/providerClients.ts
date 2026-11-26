@@ -2,6 +2,7 @@ import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
+  TraeCliSettings,
   isProviderDriverKind,
   ProviderDriverKind,
 } from "@t3tools/contracts";
@@ -56,6 +57,22 @@ export const providerClients = makeProviderClientRegistry([
   kiroClient,
   museClient,
   piClient,
+  {
+    driverKind: ProviderDriverKind.make("traecli"),
+    label: "TRAE CLI",
+    icon: {
+      viewBox: "0 0 24 24",
+      fill: { light: "#171717", dark: "#F5F5F5" },
+      paths: [
+        {
+          d: "M1 4H22V21H4V18H1ZM4 7V18H19V7ZM11 10L13 12L11 14L9 12ZM16 10L18 12L16 14L14 12Z",
+          fillRule: "evenodd",
+        },
+      ],
+    },
+    acpRegistryAgentIds: ["traecli"],
+    settingsSchema: TraeCliSettings,
+  },
   acpRegistryClient,
 ]);
 

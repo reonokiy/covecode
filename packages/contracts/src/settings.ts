@@ -761,6 +761,43 @@ export const CodexSettings = makeProviderSettingsSchema(
 );
 export type CodexSettings = typeof CodexSettings.Type;
 
+export const TraeCliSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("traecli").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the TRAE CLI binary used by this instance.",
+        providerSettingsForm: { placeholder: "traecli", clearWhenEmpty: "omit" },
+      }),
+    ),
+    homePath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "TRAE_HOME path",
+        description: "Custom TRAE CLI home and config directory.",
+        providerSettingsForm: { placeholder: "~/.trae", clearWhenEmpty: "omit" },
+      }),
+    ),
+    launchArgs: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Launch arguments",
+        description: "Additional CLI arguments passed to traecli app-server on session start.",
+      }),
+    ),
+    customModels: Schema.Array(CustomModelSetting).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  { order: ["binaryPath", "homePath", "launchArgs"] },
+);
+export type TraeCliSettings = typeof TraeCliSettings.Type;
+
 const CLAUDE_AUTO_COMPACT_WINDOW_PATTERN = /^(?:|[1-9]\d{5}|1000000)$/;
 
 export const IDLE_COMPACTION_MODES = [

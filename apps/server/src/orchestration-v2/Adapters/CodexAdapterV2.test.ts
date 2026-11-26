@@ -23,6 +23,7 @@ import {
   ProjectId,
   type ProviderApprovalDecision,
   ProviderInstanceId,
+  ProviderDriverKind,
   ProviderSessionId,
   ProviderSetupError,
   ProviderThreadId,
@@ -924,159 +925,169 @@ function withReplayRequestId(
 }
 
 describe("CodexAdapterV2 process exit", () => {
-  it.effect.each([
-    { exit: "numeric", active: false },
-    { exit: "SIGKILL", active: false },
-    { exit: "numeric", active: true },
-    { exit: "SIGKILL", active: true },
-  ] as const)("retires the shared session after $exit (active turn: $active)", ({ exit, active }) =>
-    Effect.gen(function* () {
-      const scenario = `process-exit-${exit}-${active}`;
-      const nativeThreadId = `native-${scenario}`;
-      const nativeTurnId = `turn-${scenario}`;
-      const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
-      const emit = (frame: unknown) =>
-        Queue.offer(input, new TextEncoder().encode(JSON.stringify(frame) + "\n"));
-      const outputEnded = yield* Deferred.make<void>();
-      const turnStarted = yield* Deferred.make<void>();
-      const turnCompleted = yield* Deferred.make<void>();
-      const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
-      const preamble = withConfigReadBeforeTurnStart(
-        codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "work" }),
-      );
-      const terminationError =
-        exit === "numeric"
-          ? new CodexError.CodexAppServerProcessExitedError({ code: 17, pid: 52 })
-          : new CodexError.CodexAppServerTransportError({
-              operation: "read-process-exit-status",
-              pid: 52,
-              cause: PlatformError.systemError({
-                _tag: "Unknown",
-                module: "ChildProcess",
-                method: "exitCode",
-                cause: new Error("Process terminated by SIGKILL"),
-              }),
-            });
-      const client = yield* CodexClient.make(
-        Stdio.make({
-          args: Effect.succeed([]),
-          stdin: Stream.fromQueue(input),
-          stdout: () =>
-            Sink.forEach((chunk: string | Uint8Array) =>
-              Effect.gen(function* () {
-                const frame = JSON.parse(
-                  typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
-                ) as { readonly id?: number; readonly method: string };
-                const response = preamble.find(
-                  (entry) =>
-                    entry.type === "emit_inbound" &&
-                    entry.label === frame.method &&
-                    Predicate.isObject(entry.frame) &&
-                    "id" in entry.frame,
-                );
-                if (response?.type === "emit_inbound" && Predicate.isObject(response.frame)) {
-                  yield* emit({ ...response.frame, id: frame.id });
-                }
-              }),
-            ).pipe(Sink.ensuring(Deferred.succeed(outputEnded, undefined))),
-          stderr: () => Sink.drain,
-        }),
-        {},
-        Effect.succeed(terminationError),
-      );
-      const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
-        instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
-        settings: DEFAULT_CODEX_SETTINGS,
-        environment: {},
-        clientFactory: { open: () => Effect.succeed(client) },
-        digest: yield* Digest.Digest,
-        fileSystem: yield* FileSystem.FileSystem,
-        idAllocator: yield* IdAllocator.IdAllocatorV2,
-        serverConfig: yield* ProviderReplayHarness.makeReplayServerConfig(scenario).pipe(
-          Effect.orDie,
-        ),
-      });
-      const threadId = ThreadId.make(`thread-${scenario}`);
-      const runtime = yield* adapter.openSession({
-        threadId,
-        providerSessionId: ProviderSessionId.make(`session-${scenario}`),
-        modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-      });
-      const eventReader = yield* runtime.events.pipe(
-        Stream.runForEach((event) =>
-          Effect.sync(() => events.push(event)).pipe(
-            Effect.andThen(
-              event.type === "provider_turn.updated" && event.providerTurn.status === "running"
-                ? Deferred.succeed(turnStarted, undefined)
-                : event.type === "turn.terminal"
-                  ? Deferred.succeed(turnCompleted, undefined)
-                  : Effect.void,
+  it.effect.each(
+    [
+      { exit: "numeric", active: false },
+      { exit: "SIGKILL", active: false },
+      { exit: "numeric", active: true },
+      { exit: "SIGKILL", active: true },
+    ].flatMap((row) => ["codex", "traecli"].map((driver) => ({ ...row, driver }))),
+  )(
+    "retires the $driver shared session after $exit (active turn: $active)",
+    ({ exit, active, driver }) =>
+      Effect.gen(function* () {
+        const scenario = `process-exit-${exit}-${active}`;
+        const nativeThreadId = `native-${scenario}`;
+        const nativeTurnId = `turn-${scenario}`;
+        const input = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+        const emit = (frame: unknown) =>
+          Queue.offer(input, new TextEncoder().encode(JSON.stringify(frame) + "\n"));
+        const outputEnded = yield* Deferred.make<void>();
+        const turnStarted = yield* Deferred.make<void>();
+        const turnCompleted = yield* Deferred.make<void>();
+        const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
+        const preamble = withConfigReadBeforeTurnStart(
+          codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "work" }),
+        );
+        const terminationError =
+          exit === "numeric"
+            ? new CodexError.CodexAppServerProcessExitedError({ code: 17, pid: 52 })
+            : new CodexError.CodexAppServerTransportError({
+                operation: "read-process-exit-status",
+                pid: 52,
+                cause: PlatformError.systemError({
+                  _tag: "Unknown",
+                  module: "ChildProcess",
+                  method: "exitCode",
+                  cause: new Error("Process terminated by SIGKILL"),
+                }),
+              });
+        const client = yield* CodexClient.make(
+          Stdio.make({
+            args: Effect.succeed([]),
+            stdin: Stream.fromQueue(input),
+            stdout: () =>
+              Sink.forEach((chunk: string | Uint8Array) =>
+                Effect.gen(function* () {
+                  const frame = JSON.parse(
+                    typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
+                  ) as { readonly id?: number; readonly method: string };
+                  const response = preamble.find(
+                    (entry) =>
+                      entry.type === "emit_inbound" &&
+                      entry.label === frame.method &&
+                      Predicate.isObject(entry.frame) &&
+                      "id" in entry.frame,
+                  );
+                  if (response?.type === "emit_inbound" && Predicate.isObject(response.frame)) {
+                    yield* emit({ ...response.frame, id: frame.id });
+                  }
+                }),
+              ).pipe(Sink.ensuring(Deferred.succeed(outputEnded, undefined))),
+            stderr: () => Sink.drain,
+          }),
+          {},
+          Effect.succeed(terminationError),
+        );
+        const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
+          driver: ProviderDriverKind.make(driver),
+          instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CODEX_SETTINGS,
+          environment: {},
+          clientFactory: { open: () => Effect.succeed(client) },
+          digest: yield* Digest.Digest,
+          fileSystem: yield* FileSystem.FileSystem,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          serverConfig: yield* ProviderReplayHarness.makeReplayServerConfig(scenario).pipe(
+            Effect.orDie,
+          ),
+        });
+        const threadId = ThreadId.make(`thread-${scenario}`);
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`session-${scenario}`),
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        });
+        const eventReader = yield* runtime.events.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => events.push(event)).pipe(
+              Effect.andThen(
+                event.type === "provider_turn.updated" && event.providerTurn.status === "running"
+                  ? Deferred.succeed(turnStarted, undefined)
+                  : event.type === "turn.terminal"
+                    ? Deferred.succeed(turnCompleted, undefined)
+                    : Effect.void,
+              ),
             ),
           ),
-        ),
-        Effect.forkScoped,
-      );
-      const providerThread = yield* runtime.ensureThread({
-        threadId,
-        modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-      });
-      yield* runtime.startTurn(
-        makeCodexTestTurnInput({
+          Effect.forkScoped,
+        );
+        const providerThread = yield* runtime.ensureThread({
           threadId,
-          providerThread,
-          now: yield* DateTime.now,
-          attemptId: RunAttemptId.make(`attempt-${scenario}`),
-          text: "work",
-        }),
-      );
-      yield* emit({
-        method: "turn/started",
-        params: {
-          threadId: nativeThreadId,
-          turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }),
-        },
-      });
-      yield* Deferred.await(turnStarted);
-      if (!active) {
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        });
+        assert.equal(adapter.driver, driver);
+        assert.equal(runtime.providerSession.driver, driver);
+        assert.equal(providerThread.driver, driver);
+        assert.equal(providerThread.nativeThreadRef?.driver, driver);
+        yield* runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId,
+            providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-${scenario}`),
+            text: "work",
+          }),
+        );
         yield* emit({
-          method: "turn/completed",
+          method: "turn/started",
           params: {
             threadId: nativeThreadId,
-            turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+            turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }),
           },
         });
-        yield* Deferred.await(turnCompleted);
-        assert.isTrue(
-          events.some((event) => event.type === "turn.terminal" && event.status === "completed"),
-        );
-      }
+        yield* Deferred.await(turnStarted);
+        assert.isTrue(events.every((event) => event.driver === driver));
+        if (!active) {
+          yield* emit({
+            method: "turn/completed",
+            params: {
+              threadId: nativeThreadId,
+              turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+            },
+          });
+          yield* Deferred.await(turnCompleted);
+          assert.isTrue(
+            events.some((event) => event.type === "turn.terminal" && event.status === "completed"),
+          );
+        }
 
-      yield* Queue.end(input);
-      // Output closes only after the protocol records the process termination.
-      yield* Deferred.await(outputEnded);
-      const rpcError = yield* client.request("thread/list", {}).pipe(Effect.flip);
-      assert.strictEqual(rpcError, terminationError);
-      // Without the fix the stream never ends, so this waits until the project timeout.
-      const readerExit = yield* Fiber.await(eventReader);
-      // A failure, not a clean end, carries the Codex error into the session's lastError.
-      assert.isTrue(
-        Exit.isFailure(readerExit) &&
-          isProviderAdapterEventStreamError(Cause.squash(readerExit.cause)),
-        "the session manager must receive process death so it can retire the shared process",
-      );
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(
-          IdAllocator.layer,
-          McpProviderSessions.layer,
-          NodeServices.layer,
-          NodeCrypto.layer,
+        yield* Queue.end(input);
+        // Output closes only after the protocol records the process termination.
+        yield* Deferred.await(outputEnded);
+        const rpcError = yield* client.request("thread/list", {}).pipe(Effect.flip);
+        assert.strictEqual(rpcError, terminationError);
+        // Without the fix the stream never ends, so this waits until the project timeout.
+        const readerExit = yield* Fiber.await(eventReader);
+        // A failure, not a clean end, carries the Codex error into the session's lastError.
+        assert.isTrue(
+          Exit.isFailure(readerExit) &&
+            isProviderAdapterEventStreamError(Cause.squash(readerExit.cause)),
+          "the session manager must receive process death so it can retire the shared process",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
-    ),
   );
 
   it.effect("counts the app-server as a running agent until its session closes", () => {

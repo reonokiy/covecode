@@ -25,7 +25,7 @@ export class MigrateDevDbNotInWorktreeError extends Schema.TaggedError<MigrateDe
   {},
 ) {
   override get message(): string {
-    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .t3 directory.";
+    return "Not inside a linked git worktree. Pass --base-dir to target an isolated .cove directory.";
   }
 }
 
@@ -635,11 +635,11 @@ export const migrateDevDbCommand = Command.make(
     ),
     baseDir: Flag.String("base-dir").pipe(
       Flag.optional,
-      Flag.withDescription("Isolated .t3 directory. Defaults to the current worktree's .t3."),
+      Flag.withDescription("Isolated .cove directory. Defaults to the current worktree's .cove."),
     ),
     source: Flag.String("source").pipe(
       Flag.optional,
-      Flag.withDescription("Source database. Defaults to ~/.t3/userdata/statev2.sqlite."),
+      Flag.withDescription("Source database. Defaults to ~/.cove/userdata/statev2.sqlite."),
     ),
   },
   ({ projects, threadsPerProject, baseDir, source }) =>
@@ -666,7 +666,7 @@ export const migrateDevDbCommand = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    "Rebuild the worktree dev database from a pruned snapshot of the real ~/.t3 data, then run migrations.",
+    "Rebuild the worktree dev database from a pruned snapshot of the real ~/.cove data, then run migrations.",
   ),
 );
 

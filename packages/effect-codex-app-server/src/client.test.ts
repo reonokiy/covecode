@@ -163,6 +163,53 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
     }),
   );
 
+  it.effect("normalizes compatible native payloads before typed decoding", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const context = yield* Layer.build(
+        CodexClient.layerChildProcess(handle, {
+          normalizeIncomingPayload: (method, payload) =>
+            method === "initialize"
+              ? { ...(payload as object), userAgent: "native-provider" }
+              : payload,
+        }),
+      );
+      const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+        Effect.provide(context),
+      );
+      const response = yield* client.request("initialize", {
+        clientInfo: { name: "native-test", version: "0.0.0" },
+      });
+      assert.equal(response.userAgent, "native-provider");
+      const delivered = yield* Deferred.make<unknown>();
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const nativeClient = yield* CodexClient.make(stdio, {
+        normalizeIncomingPayload: (method, payload) =>
+          method === "item/agentMessage/delta"
+            ? { ...(payload as object), delta: "native text" }
+            : payload,
+      });
+      yield* nativeClient.handleServerNotification("item/agentMessage/delta", (payload) =>
+        Deferred.succeed(delivered, payload).pipe(Effect.asVoid),
+      );
+      yield* Queue.offer(
+        input,
+        new TextEncoder().encode(
+          JSON.stringify({
+            method: "item/agentMessage/delta",
+            params: { itemId: "native-item", threadId: "native-thread", turnId: "native-turn" },
+          }) + "\n",
+        ),
+      );
+      assert.deepEqual(yield* Deferred.await(delivered), {
+        itemId: "native-item",
+        threadId: "native-thread",
+        turnId: "native-turn",
+        delta: "native text",
+      });
+    }),
+  );
+
   it.effect("warns once about a notification that fails to decode and keeps dispatching", () =>
     Effect.gen(function* () {
       const secret = "codex-notification-secret-sentinel";
