@@ -39,8 +39,6 @@ describe("cloud-only deep links", () => {
     "covecode://connect-onboarding",
     "covecode-dev://connect-onboarding/?source=x",
     "covecode://settings/waitlist",
-    "covecode://settings/auth",
-    "exp://192.168.1.2:8081/--/settings/auth",
   ])("ignores %s without cloud config", (url) => {
     expect(shouldHandleAppLink(url, false)).toBe(false);
     expect(shouldHandleAppLink(url, true)).toBe(true);
@@ -49,6 +47,8 @@ describe("cloud-only deep links", () => {
   it.each([
     "covecode://settings",
     "covecode://settings/authors",
+    "covecode://settings/auth",
+    "exp://192.168.1.2:8081/--/settings/auth",
     "covecode://pair?next=settings/auth",
     "covecode://threads/env/thread/files/scripts/connect-onboarding",
     "covecode://new/draft/files/settings/auth",

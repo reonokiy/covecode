@@ -6,6 +6,9 @@ import { dcutr } from "@libp2p/dcutr";
 import { identify, identifyPush } from "@libp2p/identify";
 import type { Connection, Libp2p, PeerId, PrivateKey } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
+import { webRTC } from "@libp2p/webrtc";
+import { BROWSER_TUNNEL_PROTOCOL } from "./browserProtocol.ts";
+import { serveBrowserStream } from "./browserBridge.ts";
 import { webSockets } from "@libp2p/websockets";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
@@ -82,10 +85,11 @@ export async function createEnvironmentLibp2pTunnel(
   const node: Libp2p = await createLibp2p({
     privateKey,
     addresses: {
-      listen: [...(enableP2p ? ["/ip4/0.0.0.0/tcp/0"] : []), "/p2p-circuit"],
+      listen: [...(enableP2p ? ["/ip4/0.0.0.0/tcp/0", "/webrtc"] : []), "/p2p-circuit"],
     },
     transports: [
       webSockets(),
+      ...(enableP2p ? [webRTC()] : []),
       tcp(),
       circuitRelayTransport({
         reservationCompletionTimeout: 10_000,
@@ -142,6 +146,16 @@ export async function createEnvironmentLibp2pTunnel(
     },
   );
 
+  await node.handle(
+    BROWSER_TUNNEL_PROTOCOL,
+    (stream) => serveBrowserStream(stream, options.localHost, options.localPort),
+    {
+      runOnLimitedConnection: true,
+      maxInboundStreams: 256,
+      maxOutboundStreams: 256,
+    },
+  );
+
   const dialAndRegister = async (): Promise<void> => {
     let lastError: unknown;
     let selectedConnection: Connection | null = null;
@@ -169,6 +183,13 @@ export async function createEnvironmentLibp2pTunnel(
       endpointId: options.endpointId,
       endpointKey: options.endpointKey,
       connectorToken: options.connectorToken,
+      directMultiaddrs: enableP2p
+        ? node
+            .getMultiaddrs()
+            .map(String)
+            .filter((address) => !address.includes("/p2p-circuit"))
+            .slice(0, 16)
+        : [],
     });
     const ack = await readBoundedJsonLine<RegisterResponsePayload>(regStream);
     if (ack.ok !== true) {

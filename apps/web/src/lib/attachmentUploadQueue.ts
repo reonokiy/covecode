@@ -6,7 +6,7 @@ import {
   type ChatAttachment,
   type EnvironmentId,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { browserTunnelHost, parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
@@ -149,6 +149,33 @@ function uploadBytes(input: {
   readonly signal: AbortSignal;
   readonly onProgress: (progress: number) => void;
 }): Promise<void> {
+  if (browserTunnelHost.test(new URL(input.url).hostname)) {
+    const timeout = AbortSignal.timeout(UPLOAD_TIMEOUT_MS);
+    const signal = AbortSignal.any([input.signal, timeout]);
+    return import("../cloud/browserTunnel").then(async ({ fetchWebPeer }) => {
+      let response: Response;
+      try {
+        response = await fetchWebPeer(
+          new Request(input.url, {
+            method: "POST",
+            headers: { "content-type": input.mimeType },
+            body: input.file,
+            signal,
+          }),
+          (sent) => {
+            if (input.file.size) input.onProgress(sent / input.file.size);
+          },
+        );
+        await response.arrayBuffer();
+      } catch {
+        if (input.signal.aborted) throw new Error(m(msg("Upload cancelled")));
+        if (timeout.aborted) throw new Error(m(msg("Upload timed out")));
+        throw new Error(m(msg("Upload failed")));
+      }
+      if (!response.ok)
+        throw new Error(m(msg("Upload rejected ({status})", { status: response.status })));
+    });
+  }
   const xhr = new XMLHttpRequest();
   return new Promise<void>((resolve, reject) => {
     xhr.open("POST", input.url, true);

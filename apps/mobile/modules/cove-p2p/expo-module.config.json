@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["CoveP2pModule"] },
+  "android": { "modules": ["expo.modules.covep2p.CoveP2pModule"] }
+}

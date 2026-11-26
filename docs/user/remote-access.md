@@ -33,6 +33,10 @@ browser link and a short code. Open the link on any device, confirm the code
 matches, and approve. The CLI continues on its own, so you do not need to forward
 an OAuth callback port.
 
+To sign in, choose **Sign in to T3 Connect** (on mobile, **Settings → T3 Account**) and enter your operator’s **Control panel address**, such as `https://cp.example.com`. Your client remembers it and gets the sign-in provider, available environments and relay addresses from that panel. To use a different panel, sign out and enter its address the next time you sign in.
+
+When connecting through Cove’s control panel for the first time, run `cove connect peer-id` on the host and compare the result with the ID shown on your device. Confirm a match to remember that host. The device tries a direct encrypted connection and can use the relay when the networks prevent it.
+
 T3 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not

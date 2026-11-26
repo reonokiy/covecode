@@ -292,6 +292,11 @@ it.effect("provider auth deep links navigate and reveal the running desktop", ()
     ]);
     listeners.get("open-url")!(event, "covecode-dev://app/welcome#agents:machine-id");
     assert.equal(event.preventDefault.mock.calls.length, 1);
+    listeners.get("open-url")!(
+      event,
+      "covecode-dev://app/auth/cove?state=expected&code=abc&next=ignored",
+    );
+    assert.deepEqual(loadURL.mock.calls.at(-1), ["covecode-dev://app/?state=expected&code=abc"]);
   }).pipe(
     Effect.scoped,
     Effect.provide(layerDesktopClerk(true, [], "darwin", undefined, undefined, listeners)),

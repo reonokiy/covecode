@@ -1,3 +1,4 @@
+import { Button } from "../../components/ui/Button";
 import * as Linking from "expo-linking";
 import * as AuthSession from "expo-auth-session";
 import { useGT } from "gt-react-native";
@@ -5,16 +6,13 @@ import { useNavigation } from "@react-navigation/native";
 import { useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { AppTextInput } from "../../components/ui/AppText";
+import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
+import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { useMobileCloudAuth } from "../cloud/useMobileCloudAuth";
 import { T3ConnectProfilePage } from "../cloud/T3ConnectProfilePage";
 
-// Without cloud config the app has no entry point here and appLinking drops the deep link.
 export function SettingsAuthRouteScreen() {
-  return hasCloudPublicConfig() ? <ConfiguredSettingsAuthRouteScreen /> : null;
-}
-
-function ConfiguredSettingsAuthRouteScreen() {
   const { isLoaded, isSignedIn, user, signIn, signOut } = useMobileCloudAuth();
   const navigation = useNavigation();
   const gt = useGT();
@@ -32,20 +30,7 @@ function ConfiguredSettingsAuthRouteScreen() {
   if (!isLoaded) return null;
 
   if (!isSignedIn) {
-    const redirectUri = AuthSession.makeRedirectUri({
-      scheme: Linking.createURL("/").split(":")[0],
-    });
-    return (
-      <View style={styles.container}>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() => void signIn(redirectUri)}
-          accessibilityRole="button"
-        >
-          <Text style={styles.buttonText}>{gt("Sign in to T3 Connect")}</Text>
-        </TouchableOpacity>
-      </View>
-    );
+    return <ControlPlaneSignIn signIn={signIn} />;
   }
 
   return (
@@ -59,6 +44,66 @@ function ConfiguredSettingsAuthRouteScreen() {
       >
         <Text style={styles.buttonText}>{gt("Sign out")}</Text>
       </TouchableOpacity>
+    </View>
+  );
+}
+
+function ControlPlaneSignIn({
+  signIn,
+}: {
+  signIn: ReturnType<typeof useMobileCloudAuth>["signIn"];
+}) {
+  const gt = useGT();
+  const [address, setAddress] = useState(() => resolveCloudPublicConfig().relay.url ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  async function submit() {
+    if (busy || !normalizeSecureRelayUrl(address)) return;
+    setBusy(true);
+    setError(false);
+    try {
+      await signIn(
+        AuthSession.makeRedirectUri({ scheme: Linking.createURL("/").split(":")[0] }),
+        address,
+      );
+    } catch {
+      setError(true);
+    }
+    setBusy(false);
+  }
+  return (
+    <View style={styles.container} className="gap-3">
+      <Text className="text-foreground">{gt("Control panel address")}</Text>
+      <AppTextInput
+        accessibilityLabel={gt("Control panel address")}
+        placeholder="https://cp.example.com"
+        keyboardType="url"
+        autoCapitalize="none"
+        autoCorrect={false}
+        value={address}
+        onChangeText={(next) => {
+          setAddress(next);
+          setError(false);
+        }}
+        editable={!busy}
+        onSubmitEditing={submit}
+      />
+      {address.trim().length > 0 && !normalizeSecureRelayUrl(address) && (
+        <Text className="text-foreground-muted">
+          {gt("Enter an HTTPS address, or use HTTP on localhost.")}
+        </Text>
+      )}
+      {error && (
+        <Text accessibilityRole="alert" className="text-destructive">
+          {gt("Could not start sign-in. Check the control panel address and try again.")}
+        </Text>
+      )}
+      <Button
+        label={gt("Sign in to T3 Connect")}
+        loading={busy}
+        disabled={!normalizeSecureRelayUrl(address)}
+        onPress={submit}
+      />
     </View>
   );
 }

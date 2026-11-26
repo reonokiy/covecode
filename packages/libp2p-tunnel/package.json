@@ -6,6 +6,11 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./proxy": "./src/p2pProxy.ts",
+    "./browser": {
+      "types": "./src/browser.ts",
+      "import": "./src/browser.ts"
     }
   },
   "scripts": {
@@ -22,14 +27,16 @@
     "@libp2p/interface": "catalog:",
     "@libp2p/peer-id": "catalog:",
     "@libp2p/tcp": "catalog:",
+    "@libp2p/utils": "catalog:",
+    "@libp2p/webrtc": "catalog:",
     "@libp2p/websockets": "catalog:",
     "@multiformats/multiaddr": "catalog:",
-    "libp2p": "catalog:"
+    "libp2p": "catalog:",
+    "ws": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/ws": "catalog:",
-    "vite-plus": "catalog:",
-    "ws": "catalog:"
+    "vite-plus": "catalog:"
   }
 }

@@ -1,3 +1,5 @@
+import * as HttpServer from "effect/http/HttpServer";
+import * as NetAddress from "effect/net/NetAddress";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -31,6 +33,11 @@ const collectEvents = Effect.gen(function* () {
 }).pipe(Effect.withSpan("preview.test.collectEvents"));
 
 const layer = PreviewManager.layer.pipe(
+  Layer.provide(
+    Layer.mock(HttpServer.HttpServer)({
+      address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
+    }),
+  ),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-preview-manager-" })),
   Layer.provide(NodeCrypto.layer),
   Layer.provide(NodeServices.layer),
@@ -56,6 +63,14 @@ it.layer(layer)("PreviewManager", (it) => {
       if (events[0]?.type === "opened") {
         expect(events[0].tabId).toBe(snapshot.tabId);
       }
+      const asset = yield* manager.open({
+        threadId,
+        runtime: "server",
+        url: "/api/assets/signed/guide.pdf",
+      });
+      expect(asset.navStatus).toMatchObject({
+        url: "http://127.0.0.1:3773/api/assets/signed/guide.pdf",
+      });
     }),
   );
 

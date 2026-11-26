@@ -106,8 +106,17 @@ export const make = Effect.gen(function* () {
         return true;
       };
       const resumeProviderAuth = (value: string | undefined) => {
-        const destination = providerAuthReturnUrl(value);
         const expectedOrigin = `${ElectronProtocol.getDesktopScheme(environment.isDevelopment)}://app`;
+        let destination = providerAuthReturnUrl(value);
+        if (value?.startsWith(expectedOrigin + "/auth/cove?")) {
+          const callback = new URL(value);
+          const state = callback.searchParams.get("state");
+          const code = callback.searchParams.get("code");
+          const error = callback.searchParams.get("error");
+          if (!state || (!code && !error)) return false;
+          const query = new URLSearchParams({ state, ...(code ? { code } : { error: error! }) });
+          destination = expectedOrigin + "/?" + query.toString();
+        }
         if (!destination?.startsWith(`${expectedOrigin}/`)) return false;
         void runPromise(
           Effect.gen(function* () {

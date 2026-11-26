@@ -281,7 +281,7 @@ async function startDummyEnvironmentServer() {
       res.end(JSON.stringify({ ok: true, from: "dummy-env", path: req.url }));
       return;
     }
-    if (req.method === "POST" && req.url === "/echo") {
+    if (req.method === "POST" && req.url === "/api/hooks/demo/tok%2Fen") {
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -377,7 +377,7 @@ async function httpRequestJson(input: {
 
 describe("cove-cp", () => {
   it.live(
-    "serves OIDC control-plane metadata, authenticates OIDC JWTs, and proxies HTTP + WS over libp2p",
+    "serves OIDC control-plane metadata, authenticates OIDC JWTs, and refuses plaintext environment HTTP and WebSocket traffic",
     () =>
       Effect.gen(function* () {
         const oidc = yield* Effect.acquireRelease(
@@ -523,47 +523,38 @@ describe("cove-cp", () => {
           ],
         });
 
+        const forwarded = yield* Effect.promise(() =>
+          httpRequestJson({
+            url: `${relay.baseUrl}/v1/hooks/${endpointKey}/demo/tok%2Fen`,
+            method: "POST",
+            body: { event: "from-provider" },
+          }),
+        );
+        expect(forwarded.status).toBe(200);
+        expect(forwarded.body).toMatchObject({ body: { event: "from-provider" } });
         const proxiedGet = yield* Effect.promise(() =>
           httpRequestJson({
             url: `${relay.baseUrl}/t/${endpointKey}/hello`,
           }),
         );
-        expect(proxiedGet.status).toBe(200);
-        expect(proxiedGet.body).toEqual({
-          ok: true,
-          from: "dummy-env",
-          path: "/hello",
-        });
-
-        const proxiedPost = yield* Effect.promise(() =>
-          httpRequestJson({
-            method: "POST",
-            url: `${relay.baseUrl}/t/${endpointKey}/echo`,
-            body: { hello: "cove" },
-          }),
-        );
-        expect(proxiedPost.status).toBe(200);
-        expect(proxiedPost.body).toEqual({
-          ok: true,
-          body: { hello: "cove" },
-        });
-
-        const wsReply = yield* Effect.promise(
+        expect(proxiedGet.status).toBe(404);
+        const upgradeStatus = yield* Effect.promise(
           () =>
-            new Promise<string>((resolve, reject) => {
+            new Promise<number>((resolve, reject) => {
               const ws = new WebSocket(`ws://127.0.0.1:${relay.port}/t/${endpointKey}/ws`);
-              ws.once("error", reject);
+              ws.once("unexpected-response", (_request, response) => {
+                response.resume();
+                resolve(response.statusCode ?? 0);
+                ws.terminate();
+              });
               ws.once("open", () => {
-                ws.send("ping");
-              });
-              ws.once("message", (data, isBinary) => {
-                const text = isBinary ? Buffer.from(data as Buffer).toString("utf8") : String(data);
                 ws.close();
-                resolve(text);
+                reject(new Error("Plaintext tunnel upgrade accepted"));
               });
+              ws.once("error", reject);
             }),
         );
-        expect(wsReply).toBe("echo:ping");
+        expect(upgradeStatus).toBe(404);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

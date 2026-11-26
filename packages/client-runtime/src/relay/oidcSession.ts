@@ -62,6 +62,7 @@ export interface OidcSessionOptions {
   readonly storage: OidcSessionStorage;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => number;
+  readonly randomValues?: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array;
 }
 
 export interface OidcSession extends CloudAccountSource {
@@ -212,10 +213,10 @@ export function createOidcSession(options: OidcSessionOptions): OidcSession {
   // SECTION: authorization
   const beginAuthorization: OidcSession["beginAuthorization"] = async (redirectUri) => {
     const discovery = await getDiscovery();
-    const codeVerifier = generatePkceVerifier();
+    const codeVerifier = generatePkceVerifier(32, options.randomValues);
     const codeChallenge = createPkceChallenge(codeVerifier);
-    const state = generateOAuthState();
-    const nonce = generatePkceVerifier(16);
+    const state = generateOAuthState(24, options.randomValues);
+    const nonce = generatePkceVerifier(16, options.randomValues);
     const scopeValue =
       options.config.scopes && options.config.scopes.length > 0
         ? options.config.scopes.join(" ")

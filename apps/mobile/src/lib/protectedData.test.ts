@@ -49,6 +49,7 @@ vi.mock("../features/cloud/managedRelayLayer", async () => {
   return { layer: () => Layer.empty };
 });
 vi.mock("../features/cloud/publicConfig", () => ({
+  loadControlPlaneSelection: async () => {},
   resolveCloudPublicConfig: () => ({ relay: { url: null } }),
 }));
 vi.mock("../features/observability/tracing", async () => ({

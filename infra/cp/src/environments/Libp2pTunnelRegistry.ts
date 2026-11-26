@@ -114,6 +114,17 @@ const makeDisabledService = (): Libp2pTunnelRegistryService => ({
   },
 });
 
+export function advertisedRelayMultiaddrs(
+  configured: readonly string[],
+  registry?: Libp2pTunnelRegistry["Service"],
+) {
+  const addresses = configured.length ? configured : (registry?.getMultiaddrs() ?? []);
+  return addresses.map((address) => {
+    const base = address.replace(/\/+$/u, "");
+    return registry?.peerId && !base.includes("/p2p/") ? `${base}/p2p/${registry.peerId}` : base;
+  });
+}
+
 export const layerDisabled: Layer.Layer<Libp2pTunnelRegistry> = Layer.succeed(
   Libp2pTunnelRegistry,
   Libp2pTunnelRegistry.of(makeDisabledService()),

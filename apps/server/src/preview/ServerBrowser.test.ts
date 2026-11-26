@@ -1,3 +1,5 @@
+import * as NetAddress from "effect/net/NetAddress";
+import * as HttpServer from "effect/http/HttpServer";
 import * as NodeEvents from "node:events";
 import * as NodeVM from "node:vm";
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Playwright download mocks perform real file operations outside the Effect runtime.
@@ -455,7 +457,13 @@ const asSession = (providerSessionId: string) => ({
 });
 const dependencies = Layer.mergeAll(
   Broker.layer,
-  Manager.layer,
+  Manager.layer.pipe(
+    Layer.provide(
+      Layer.mock(HttpServer.HttpServer)({
+        address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
+      }),
+    ),
+  ),
   Layer.succeed(ServerEnvironment.ServerEnvironment, {
     getEnvironmentId: Effect.succeed(scope.environmentId),
     getDescriptor: Effect.die("unused descriptor"),

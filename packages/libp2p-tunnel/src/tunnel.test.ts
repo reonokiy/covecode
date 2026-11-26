@@ -198,6 +198,9 @@ describe("libp2p-tunnel", () => {
 
     expect(relay.isEndpointConnected("abc123")).toBe(true);
     expect(relay.getEndpointRegistration("abc123")?.peerId).toBe(tunnel.peerId);
+    expect(relay.getEndpointRegistration("abc123")?.directMultiaddrs).toEqual(
+      expect.arrayContaining([expect.stringContaining(`/p2p/${tunnel.peerId}`)]),
+    );
 
     const gateway = await startGatewayHttpServer({
       endpointKey: "abc123",
@@ -248,6 +251,74 @@ describe("libp2p-tunnel", () => {
     expect(wsMessages[1]).toBe("echo:ping-from-client");
   });
 
+  it.each([false, true])(
+    "streams browser HTTP and WebSocket with direct connectivity %s",
+    async (direct) => {
+      const origin = await startOriginFixture();
+      cleanups.push(origin.close);
+      const relay = await createRelayLibp2pNode({
+        listenMultiaddrs: ["/ip4/127.0.0.1/tcp/0/ws"],
+        validateRegistration: () => true,
+      });
+      cleanups.push(relay.stop);
+      const tunnel = await createEnvironmentLibp2pTunnel({
+        endpointId: "browser-test",
+        endpointKey: "browser",
+        connectorToken: "test",
+        relayMultiaddrs: relay.getMultiaddrs(),
+        localHost: "127.0.0.1",
+        localPort: origin.port,
+        enableP2p: direct,
+      });
+      cleanups.push(tunnel.stop);
+      await tunnel.waitForRelayReservation(10_000);
+      const { openBrowserTunnel } = await import("./browser.ts");
+      const browser = await openBrowserTunnel({
+        peerId: tunnel.peerId,
+        direct: [],
+        relays: relay.getMultiaddrs(),
+      });
+      expect(browser.getActiveTransport()).toBe(direct ? "direct" : "relay");
+      cleanups.push(async () => {
+        await browser.close();
+      });
+      let sent = 0;
+      const payload = JSON.stringify({ text: "hello" });
+      const res = await browser.fetch(
+        new Request("https://client.invalid/echo?q=1", {
+          method: "POST",
+          headers: { "x-cove-test": "encrypted" },
+          body: payload,
+        }),
+        (bytes) => {
+          sent = bytes;
+        },
+      );
+      expect(sent).toBe(Buffer.byteLength(payload));
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({
+        url: "/echo?q=1",
+        customHeader: "encrypted",
+        body: { text: "hello" },
+      });
+      const socket = browser.socket(new URL("wss://client.invalid/ws?test=browser"), ["cove-test"]);
+      const reply = await new Promise<string>((resolve, reject) => {
+        socket.onerror = () => reject(new Error("Browser socket failed"));
+        socket.onmessage = ({ data }) => {
+          if (typeof data === "string" && data.startsWith("echo:")) resolve(data);
+          else socket.send("ping");
+        };
+      });
+      expect(socket.protocol).toBe("cove-test");
+      expect(reply).toBe("echo:ping");
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.onclose = resolve;
+      });
+      socket.close(4001, "finished");
+      expect(await closed).toMatchObject({ code: 4001, reason: "finished", wasClean: true });
+    },
+  );
+
   it("proxies HTTP and WebSockets via createClientLibp2pProxy in both relay and p2p modes", async () => {
     const origin = await startOriginFixture();
     cleanups.push(() => origin.close());
@@ -289,12 +360,14 @@ describe("libp2p-tunnel", () => {
     const p2pProxy = await createClientLibp2pProxy({
       relayMultiaddrs: relay.getMultiaddrs(),
       targetPeerId: tunnel.peerId,
+      directMultiaddrs: relay.getEndpointRegistration("p2p-key")!.directMultiaddrs,
       mode: "p2p",
     });
     cleanups.push(() => p2pProxy.stop());
 
     const transportP2p = await p2pProxy.connect();
-    expect(["relay", "direct"]).toContain(transportP2p);
+    expect(transportP2p).toBe("direct");
+    expect((await fetch(new URL("/healthz", p2pProxy.httpBaseUrl))).status).toBe(404);
 
     const p2pWsReply = await new Promise<string>((resolve, reject) => {
       const ws = new WebSocket(`${p2pProxy.wsBaseUrl}/ws?mode=p2p`);

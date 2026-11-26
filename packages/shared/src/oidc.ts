@@ -1,3 +1,4 @@
+import { normalizeSecureRelayUrl } from "./relayUrl.ts";
 import { sha256 } from "@noble/hashes/sha2";
 import * as Clock from "effect/Clock";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -27,17 +28,34 @@ const DEFAULT_OIDC_ALLOWED_ALGORITHMS = [
   "EdDSA",
 ] as const satisfies ReadonlyArray<Jwk.AsymmetricAlgorithm>;
 
+export function isSecureOidcEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      normalizeSecureRelayUrl(url.origin) !== null &&
+      !url.username &&
+      !url.password &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
 
+const Endpoint = NonEmptyString.check(Schema.makeFilter(isSecureOidcEndpoint));
+
 export const OidcDiscoveryDocument = Schema.Struct({
-  issuer: NonEmptyString,
-  authorization_endpoint: NonEmptyString,
-  token_endpoint: NonEmptyString,
-  jwks_uri: NonEmptyString,
-  userinfo_endpoint: Schema.optionalKey(NonEmptyString),
-  end_session_endpoint: Schema.optionalKey(NonEmptyString),
-  device_authorization_endpoint: Schema.optionalKey(NonEmptyString),
-  revocation_endpoint: Schema.optionalKey(NonEmptyString),
+  issuer: Endpoint,
+  authorization_endpoint: Endpoint,
+  token_endpoint: Endpoint,
+  jwks_uri: Endpoint,
+  userinfo_endpoint: Schema.optionalKey(Endpoint),
+  end_session_endpoint: Schema.optionalKey(Endpoint),
+  device_authorization_endpoint: Schema.optionalKey(Endpoint),
+  revocation_endpoint: Schema.optionalKey(Endpoint),
   scopes_supported: Schema.optionalKey(Schema.Array(Schema.String)),
   code_challenge_methods_supported: Schema.optionalKey(Schema.Array(Schema.String)),
 });
@@ -104,10 +122,12 @@ export function oidcDiscoveryUrl(issuer: string): string {
   return `${normalizeOidcIssuer(issuer)}/.well-known/openid-configuration`;
 }
 
-export function generatePkceVerifier(byteLength = 32): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-  return Base64Url.encode(bytes);
+export function generatePkceVerifier(
+  byteLength = 32,
+  randomValues: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array = (bytes) =>
+    crypto.getRandomValues(bytes),
+): string {
+  return Base64Url.encode(randomValues(new Uint8Array(byteLength)));
 }
 
 export function createPkceChallenge(verifier: string): string {
@@ -115,10 +135,11 @@ export function createPkceChallenge(verifier: string): string {
   return Base64Url.encode(digest);
 }
 
-export function generateOAuthState(byteLength = 24): string {
-  const bytes = new Uint8Array(byteLength);
-  crypto.getRandomValues(bytes);
-  return Base64Url.encode(bytes);
+export function generateOAuthState(
+  byteLength = 24,
+  randomValues?: (bytes: Uint8Array<ArrayBuffer>) => Uint8Array,
+): string {
+  return generatePkceVerifier(byteLength, randomValues);
 }
 
 export function buildOidcAuthorizeUrl(input: {

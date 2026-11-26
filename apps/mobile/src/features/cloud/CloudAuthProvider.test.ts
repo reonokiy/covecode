@@ -34,6 +34,7 @@ vi.mock("../../state/use-composer-drafts", () => ({
 }));
 
 vi.mock("./publicConfig", () => ({
+  cloudDraftOwner: (id: string) => id,
   resolveCloudPublicConfig: vi.fn(() => ({ relay: { url: null } })),
 }));
 

@@ -24,16 +24,47 @@ import {
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import { registerBrowserTunnelAssets } from "../environment/tunnelUrl.ts";
 import { resolveMediaSource } from "../mediaSource.ts";
 import type * as RpcSession from "../rpc/session.ts";
 import {
   ASSET_URL_MAX_IN_FLIGHT,
+  previewPdfAssetUrl,
+  resolveAssetUrl,
   createAssetEnvironmentAtoms,
   createProjectFaviconUrlAtomFamily,
   makeRevisionedAssetUrlFamily,
 } from "./assets.ts";
 
 describe("project favicon URL cache", () => {
+  it("keeps the local tunnel capability on signed media URLs", () => {
+    const base = "http://127.0.0.1:44321/.cove-tunnel/0123456789abcdef0123456789abcdef";
+    for (const endpoint of [base, base + "/"]) {
+      expect(resolveAssetUrl(endpoint, "/api/assets/signed?download=1")).toBe(
+        base + "/api/assets/signed?download=1",
+      );
+      expect(previewPdfAssetUrl("http://localhost:5000/api/assets/signed/a.pdf", endpoint)).toBe(
+        base + "/api/assets/signed/a.pdf",
+      );
+    }
+    const host = "0123456789abcdef0123456789abcdef.cove.invalid";
+    const endpoint = `https://${host}/`;
+    const release = registerBrowserTunnelAssets(host, () => "https://app.test/.cove-assets/opaque");
+    try {
+      expect(resolveAssetUrl(endpoint, "/api/assets/signed/private-file")).toBe(
+        "https://app.test/.cove-assets/opaque",
+      );
+      expect(previewPdfAssetUrl("http://localhost:5000/api/assets/signed/a.pdf", endpoint)).toBe(
+        "https://app.test/.cove-assets/opaque",
+      );
+      expect(resolveAssetUrl(endpoint, "/api/attachments/upload/token")).toBe(
+        endpoint + "api/attachments/upload/token",
+      );
+    } finally {
+      release();
+    }
+  });
+
   it("does not reuse another environment, workspace, or selected icon's cached URL", () => {
     const registry = AtomRegistry.make();
     const result = Atom.make<AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>>(

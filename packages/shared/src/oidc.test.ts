@@ -87,6 +87,13 @@ describe("oidc", () => {
     });
     expect(doc.jwks_uri).toBe("https://auth.example.com/realms/cove/protocol/openid-connect/certs");
 
+    await expect(
+      fetchOidcDiscovery(doc.issuer, {
+        fetch: async () =>
+          Response.json({ ...doc, authorization_endpoint: "data:text/plain,invalid" }),
+      }),
+    ).rejects.toBeInstanceOf(OidcError);
+
     const mismatchedFetch: typeof fetch = async () =>
       new Response(
         JSON.stringify({

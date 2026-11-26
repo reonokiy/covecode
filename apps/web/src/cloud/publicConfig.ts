@@ -1,5 +1,25 @@
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 
+const selectionKey = "cove.control-plane";
+
+function readSelectedOrigin() {
+  try {
+    return (
+      normalizeSecureRelayUrl(window.sessionStorage.getItem(selectionKey) ?? "") ??
+      normalizeSecureRelayUrl(window.localStorage.getItem(selectionKey) ?? "")
+    );
+  } catch {
+    return null;
+  }
+}
+
+// A tab's account and runtime must keep using the same CP until the next navigation.
+const selectedOrigin = readSelectedOrigin();
+export function rememberControlPlane(origin: string) {
+  window.sessionStorage.setItem(selectionKey, origin);
+  window.localStorage.setItem(selectionKey, origin);
+}
+
 export interface CloudPublicConfig {
   readonly relayUrl: string | null;
   readonly relayTracing: {
@@ -24,9 +44,9 @@ function normalizeSecureUrl(value: string): string | null {
 
 export function resolveCloudPublicConfig(): CloudPublicConfig {
   return {
-    relayUrl: normalizeSecureRelayUrl(
-      (import.meta.env.VITE_T3CODE_RELAY_URL as string | undefined) ?? "",
-    ),
+    relayUrl:
+      selectedOrigin ??
+      normalizeSecureRelayUrl((import.meta.env.VITE_T3CODE_RELAY_URL as string | undefined) ?? ""),
     relayTracing: {
       tracesUrl: normalizeSecureUrl(
         (import.meta.env.VITE_RELAY_OTLP_TRACES_URL as string | undefined) ?? "",

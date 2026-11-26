@@ -13,6 +13,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   connectionStateAtom: vi.fn(),
+  fetchWebPeer: vi.fn(),
   createAssetUrl: vi.fn(),
   createUploadUrl: Symbol("create-upload-url"),
   executeAtomQuery: vi.fn(),
@@ -35,6 +36,8 @@ const mocks = vi.hoisted(() => ({
       ),
     ),
 }));
+
+vi.mock("../cloud/browserTunnel", () => ({ fetchWebPeer: mocks.fetchWebPeer }));
 
 vi.mock("@t3tools/client-runtime/state/runtime", async () => {
   const Effect = await import("effect/Effect");
@@ -235,6 +238,28 @@ describe("attachmentUploadQueue", () => {
       releaseAttachmentUpload(imageId);
     }
     vi.unstubAllGlobals();
+  });
+
+  it("sends tunnel attachment bytes to the selected peer", async () => {
+    const base = "https://0123456789abcdef0123456789abcdef.cove.invalid/";
+    mocks.readPreparedConnection.mockReturnValue({ httpBaseUrl: base });
+    let bytes: Uint8Array | undefined;
+    let url: string | undefined;
+    mocks.fetchWebPeer.mockImplementationOnce(
+      async (request: Request, progress: (sent: number) => void) => {
+        bytes = new Uint8Array(await request.arrayBuffer());
+        url = request.url;
+        progress(bytes.length);
+        return new Response(null, { status: 204 });
+      },
+    );
+    const image = makeImage("encrypted");
+    startAttachmentUpload({ environmentId: firstEnvironment, image });
+    await awaitAttachmentUploads([image.id]);
+    expect(url).toBe(base + "api/attachments/upload/pending-environment-1-encrypted.png");
+    expect(bytes).toEqual(Uint8Array.of(1, 2, 3));
+    expect(readAttachmentUpload(image.id)?.status).toBe("ready");
+    expect(TestXmlHttpRequest.requests).toHaveLength(0);
   });
 
   it("reuploads an expired image while retaining other ready images", async () => {

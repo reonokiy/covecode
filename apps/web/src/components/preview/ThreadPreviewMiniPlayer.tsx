@@ -1,7 +1,7 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
 import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@t3tools/contracts";
-import { previewPdfAssetUrl } from "@t3tools/shared/preview";
+import { previewPdfAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { PanelRightIcon, PictureInPicture2, XIcon } from "lucide-react";
 import {

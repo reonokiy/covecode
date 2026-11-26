@@ -2,6 +2,7 @@
 // non-extractable WebCrypto key, mobile signs with the platform's P-256 through a native module.
 import { msg } from "gt-i18n";
 import { MarkedText, translatableMessage } from "../errors/translatable.ts";
+import { tunnelResourceUrl } from "../environment/tunnelUrl.ts";
 import { normalizeDpopHtu, type DpopPublicJwk } from "@t3tools/shared/dpopCommon";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -50,7 +51,7 @@ export const createProof = Effect.fn("DpopProof.createProof")(function* (input: 
   readonly accessToken?: string | undefined;
   readonly key: DpopProofKey;
 }) {
-  const htu = normalizeDpopHtu(input.url);
+  const htu = normalizeDpopHtu(tunnelResourceUrl(input.url)?.href ?? input.url);
   if (htu === null)
     return yield* new DpopProofError(translatableMessage(msg("DPoP URL is invalid.")));
   const random = yield* SecureRandom.SecureRandom;

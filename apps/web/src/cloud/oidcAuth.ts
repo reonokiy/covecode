@@ -1,29 +1,30 @@
 import {
   createOidcSession,
+  controlPlaneSessionKey,
+  discoverControlPlane,
   type OidcSession,
   type OidcSessionSnapshot,
   type OidcSessionStorage,
   type PendingOidcAuthorization,
   type StoredOidcSession,
 } from "@t3tools/client-runtime/relay";
-import { RelayControlPlanePublicConfig } from "@t3tools/contracts/relay";
-import * as Schema from "effect/Schema";
+import { openControlPlaneDialog } from "./controlPlanePrompt";
 import { useSyncExternalStore } from "react";
 
-import { resolveCloudPublicConfig } from "./publicConfig";
+import { rememberControlPlane, resolveCloudPublicConfig } from "./publicConfig";
 
-const SESSION_KEY = "cove.oidc.session";
 const PENDING_KEY = "cove.oidc.pending";
 
-type StoredPending = PendingOidcAuthorization & { readonly returnTo: string };
+type StoredPending = PendingOidcAuthorization & {
+  readonly returnTo: string;
+  readonly controlPlane: string;
+};
 export type CloudAuthSnapshot = OidcSessionSnapshot | { readonly status: "unavailable" };
 
-const decodeControlPlane = Schema.decodeUnknownSync(RelayControlPlanePublicConfig);
-
-const storage: OidcSessionStorage = {
+const storage = (key: string): OidcSessionStorage => ({
   load: async () => {
     try {
-      const raw = window.localStorage.getItem(SESSION_KEY);
+      const raw = window.localStorage.getItem(key);
       return raw === null ? null : (JSON.parse(raw) as StoredOidcSession);
     } catch {
       return null;
@@ -31,13 +32,13 @@ const storage: OidcSessionStorage = {
   },
   save: async (value) => {
     try {
-      if (value === null) window.localStorage.removeItem(SESSION_KEY);
-      else window.localStorage.setItem(SESSION_KEY, JSON.stringify(value));
+      if (value === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, JSON.stringify(value));
     } catch {
       // Storage can be unavailable (private mode); the session then lasts until reload.
     }
   },
-};
+});
 
 let session: OidcSession | null = null;
 let snapshot: CloudAuthSnapshot = { status: "loading" };
@@ -55,10 +56,18 @@ async function completeRedirect(target: OidcSession): Promise<void> {
   if (!returned || !url.searchParams.has("state")) return;
   const raw = window.sessionStorage.getItem(PENDING_KEY);
   if (raw === null) return;
-  window.sessionStorage.removeItem(PENDING_KEY);
   const pending = JSON.parse(raw) as StoredPending;
-  await target.completeAuthorization(url.toString(), pending).catch(() => undefined);
-  window.history.replaceState(null, "", pending.returnTo);
+  if (
+    pending.controlPlane !== resolveCloudPublicConfig().relayUrl ||
+    pending.state !== url.searchParams.get("state")
+  )
+    return;
+  window.sessionStorage.removeItem(PENDING_KEY);
+  try {
+    await target.completeAuthorization(url.toString(), pending);
+  } finally {
+    window.history.replaceState(null, "", pending.returnTo);
+  }
 }
 
 /** Loads the OIDC config from the relay control plane once, restores the stored session and finishes a pending redirect. */
@@ -70,15 +79,15 @@ export function startCloudAuth(): Promise<OidcSession | null> {
       return null;
     }
     try {
-      const response = await fetch(new URL("/.well-known/cove-control-plane", relayUrl));
-      if (!response.ok) throw new Error(`Control plane answered ${response.status}`);
-      const { oidc } = decodeControlPlane(await response.json());
-      if (oidc === null) throw new Error("This control plane has no OIDC configuration.");
-      const next = createOidcSession({ config: oidc, storage });
+      const { oidc } = await discoverControlPlane(relayUrl, fetch);
+      const next = createOidcSession({
+        config: oidc,
+        storage: storage(controlPlaneSessionKey(relayUrl)),
+      });
       next.subscribe(publish);
       await next.restore();
+      await completeRedirect(next);
       session = next;
-      await completeRedirect(next).catch(() => undefined);
       return next;
     } catch {
       starting = null;
@@ -89,19 +98,23 @@ export function startCloudAuth(): Promise<OidcSession | null> {
   return starting;
 }
 
-export function retryCloudAuth(): void {
-  publish({ status: "loading" });
-  void startCloudAuth();
-}
-
-export async function signInToCloud(): Promise<void> {
-  const target = await startCloudAuth();
-  if (target === null) return;
-  const { url, pending } = await target.beginAuthorization(`${window.location.origin}/`);
+export async function signInToCloud(address: string): Promise<void> {
+  const { origin, oidc } = await discoverControlPlane(address, fetch);
+  const target = createOidcSession({
+    config: oidc,
+    storage: storage(controlPlaneSessionKey(origin)),
+  });
+  const redirectUri = window.desktopBridge
+    ? new URL("/auth/cove", window.location.href).href
+    : window.location.origin + "/";
+  const { url, pending } = await target.beginAuthorization(redirectUri);
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  const stored: StoredPending = { ...pending, returnTo };
+  const stored: StoredPending = { ...pending, returnTo, controlPlane: origin };
   window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(stored));
-  window.location.assign(url);
+  rememberControlPlane(origin);
+  if (window.desktopBridge) {
+    if (!(await window.desktopBridge.openExternal(url))) throw new Error("Could not open sign-in");
+  } else window.location.assign(url);
 }
 
 export async function signOutOfCloud(): Promise<void> {
@@ -130,8 +143,8 @@ export function useCloudAuth() {
     user: current.status === "signed-in" ? current.user : null,
     loadFailed: current.status === "unavailable",
     getToken: getCloudToken,
-    signIn: signInToCloud,
+    signIn: openControlPlaneDialog,
     signOut: signOutOfCloud,
-    retry: retryCloudAuth,
+    retry: openControlPlaneDialog,
   };
 }

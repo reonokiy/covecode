@@ -917,13 +917,19 @@ export function CloudRemoteEnvironmentRows({
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
 }) {
+  const { openAuthPrompt } = useCloudAuthPrompt();
   return hasCloudPublicConfig() ? (
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
       empty={<EmptyRemoteEnvironments />}
     />
-  ) : savedEnvironments.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} />
-  ) : null;
+  ) : (
+    <>
+      {savedEnvironments.length === 0 && <EmptyRemoteEnvironments cloudEnabled={false} />}
+      <Button variant="outline" size="sm" onClick={openAuthPrompt}>
+        <T>Sign in to T3 Connect</T>
+      </Button>
+    </>
+  );
 }

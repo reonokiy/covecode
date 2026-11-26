@@ -8,6 +8,7 @@ import {
   RelayDpopAccessTokenScope,
   RelayDpopTokenExchangeGrantType,
   type RelayEnvironmentConnectRequest,
+  type RelayManagedEndpoint,
   type RelayEnvironmentConnectResponse,
   type RelayEnvironmentLinkChallengeRequest,
   type RelayEnvironmentLinkChallengeResponse,
@@ -369,7 +370,16 @@ export interface ManagedRelayAuthorization {
   readonly thumbprint: string;
 }
 
+interface EnvironmentTunnelPlatform {
+  readonly prepare: (
+    environmentId: string,
+    endpoint: RelayManagedEndpoint,
+  ) => Promise<{ readonly httpBaseUrl: string; readonly wsBaseUrl: string }>;
+  readonly clear: () => void;
+}
+
 export interface ManagedRelayClientLayerOptions {
+  readonly tunnels?: EnvironmentTunnelPlatform;
   readonly relayUrl: string;
   readonly clientId: RelayPublicClientId;
   readonly accessTokenStore?: ManagedRelayAccessTokenStore;
@@ -378,6 +388,7 @@ export interface ManagedRelayClientLayerOptions {
 export class ManagedRelayClient extends Context.Service<
   ManagedRelayClient,
   {
+    readonly tunnels?: EnvironmentTunnelPlatform;
     readonly relayUrl: string;
     readonly listEnvironments: (input: {
       readonly clerkToken: string;
@@ -852,6 +863,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     );
 
   return ManagedRelayClient.of({
+    ...(options.tunnels ? { tunnels: options.tunnels } : {}),
     relayUrl,
     listEnvironments: Effect.fnUntraced(
       function* (input) {
@@ -1108,6 +1120,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       withRelayClientTracing,
     ),
     resetTokenCache: SynchronizedRef.set(cachedTokens, []).pipe(
+      Effect.tap(() => Effect.sync(() => options.tunnels?.clear())),
       Effect.andThen(options.accessTokenStore ? options.accessTokenStore.clear : Effect.void),
       Effect.withSpan("clientRuntime.managedRelay.resetTokenCache"),
       withRelayClientTracing,

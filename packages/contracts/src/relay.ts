@@ -168,6 +168,7 @@ export const RelayManagedEndpoint = Schema.Struct({
   wsBaseUrl: TrimmedNonEmptyString,
   providerKind: RelayManagedEndpointProviderKind,
   libp2pPeerId: Schema.optional(TrimmedNonEmptyString),
+  libp2pDirectMultiaddrs: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   libp2pRelayMultiaddrs: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   transportMode: Schema.optional(RelayTunnelTransportMode),
 });

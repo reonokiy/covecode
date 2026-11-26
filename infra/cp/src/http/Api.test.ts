@@ -330,7 +330,7 @@ describe("control plane public metadata & OIDC client authentication", () => {
           libp2p: {
             enabled: true,
             peerId: "12D3KooWTestPeerId",
-            relayMultiaddrs: ["/dns4/relay.example.test/tcp/4002/wss"],
+            relayMultiaddrs: ["/dns4/relay.example.test/tcp/4002/wss/p2p/12D3KooWTestPeerId"],
           },
         });
       }).pipe(Effect.scoped);

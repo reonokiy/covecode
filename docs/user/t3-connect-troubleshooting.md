@@ -1,10 +1,10 @@
 # T3 Connect troubleshooting
 
-A T3 Connect connection goes through four parts, in this order:
+A connection through Cove’s control panel has four steps.
 
 1. **This device** reaches T3 Connect over the internet.
 2. **T3 Connect** checks your sign-in and the host's link.
-3. **The host's tunnel** (cloudflared on the host) carries the request to the host.
+3. **Your device** checks the host’s peer ID and opens an encrypted libp2p connection, directly or through the relay.
 4. **T3 Code on the host** answers.
 
 When a connection fails, open **Settings > Environments**, find the environment,
@@ -23,8 +23,7 @@ T3 Connect could not reach the host's tunnel. This means one of these:
 
 - The host is asleep, turned off, or offline.
 - T3 Code is not running on the host.
-- The host's network blocks the tunnel. See
-  [Port 7844 is blocked on the host](#port-7844-is-blocked-on-the-host).
+- The host’s network blocks the relay. For a self-hosted Cove deployment, check that the host and the client can reach the relay address configured by the operator. For a Cloudflare tunnel, see [Port 7844 is blocked on the host](#port-7844-is-blocked-on-the-host).
 
 Fix:
 
@@ -35,7 +34,7 @@ Fix:
 
 ## Port 7844 is blocked on the host
 
-The tunnel on the host connects out to Cloudflare on port 7844, with TCP and
+This section applies to deployments using Cloudflare. Their host connects out on port 7844, with TCP and
 UDP. Both tunnel protocols (QUIC and HTTP/2) use this port. When the host's
 network blocks it, the tunnel cannot start, but normal web traffic still works.
 The host looks online, so this problem is easy to miss.

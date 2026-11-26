@@ -1,3 +1,4 @@
+import { installEnvironmentTunnels } from "./methods/environmentTunnels.ts";
 import { startFileDrag } from "./methods/fileDrag.ts";
 import * as Effect from "effect/Effect";
 
@@ -91,6 +92,7 @@ import {
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* installNotificationBadge();
+  yield* installEnvironmentTunnels();
   yield* PreviewIpc.installPreviewEventForwarding();
 
   yield* ipc.handle(AppActivationIpc.setReady);

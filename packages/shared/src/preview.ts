@@ -6,7 +6,11 @@ import { isLocalLoopbackHost } from "./hostClassification.ts";
 const TAB_ID_PREFIX = "tab_";
 let nextPreviewTabSequence = 0;
 
-export function previewPdfAssetUrl(rawUrl: string, httpBaseUrl: string | null): string | null {
+export function previewPdfAssetUrl(
+  rawUrl: string,
+  httpBaseUrl: string | null,
+  resolveResource?: (base: string, path: string) => string | null,
+): string | null {
   if (httpBaseUrl === null) return null;
   try {
     const url = new URL(rawUrl);
@@ -29,7 +33,8 @@ export function previewPdfAssetUrl(rawUrl: string, httpBaseUrl: string | null): 
     }
     // The browser may run on the host's loopback address. Fetch signed bytes
     // through this client's environment connection, including remote routes.
-    return new URL(`${url.pathname}${url.search}${url.hash}`, baseUrl).href;
+    const path = url.pathname + url.search + url.hash;
+    return resolveResource?.(httpBaseUrl, path) ?? new URL(path, baseUrl).href;
   } catch {
     return null;
   }

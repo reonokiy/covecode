@@ -1,3 +1,4 @@
+import { previewPdfAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
 import { useAtomValue } from "@effect/atom-react";
@@ -24,7 +25,6 @@ import {
   normalizePreviewUrl,
   isPreviewUrlNormalizationError,
   resolveAddressBarInput,
-  previewPdfAssetUrl,
   resolveSearchUrlTemplate,
 } from "@t3tools/shared/preview";
 import { msg, T, useGT, useMessages } from "gt-react";

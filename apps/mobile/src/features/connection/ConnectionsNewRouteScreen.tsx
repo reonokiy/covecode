@@ -27,7 +27,6 @@ import { FrostedCutout } from "../../components/ui/FrostedCutout";
 import { buildPairingUrl, extractPairingUrlFromQrPayload, parsePairingUrl } from "./pairing";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { CloudEnvironmentRows } from "./CloudEnvironmentRows";
 import { autoConnectReport, devAutoConnectAttemptAtom } from "./devAutoConnect";
 import { splitEnvironmentSections } from "./environmentSections";
@@ -269,7 +268,7 @@ function PairingForm({
             </Text>
           </View>
 
-          {hasCloudPublicConfig() ? <T3ConnectSection /> : null}
+          <T3ConnectSection />
         </View>
       </ScrollView>
     </SettingsScreen>

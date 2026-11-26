@@ -18,6 +18,8 @@ import {
   newPreviewTabId,
   normalizePreviewUrl,
 } from "@t3tools/shared/preview";
+import { loopbackUrlHostForAddress } from "../startupAccess.ts";
+import * as HttpServer from "effect/http/HttpServer";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
@@ -127,6 +129,7 @@ const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
 /** @public */
 export const make = Effect.gen(function* PreviewManagerMake() {
+  const httpServer = yield* HttpServer.HttpServer;
   const random = yield* SecureRandom.SecureRandom;
   const serverEpoch = yield* random.uuidV4();
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);
@@ -191,14 +194,26 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const open: PreviewManager["Service"]["open"] = Effect.fn("PreviewManager.open")(
     function* (input) {
       const runtime = input.runtime;
+      let url = input.url;
+      if (runtime === "server" && url?.startsWith("/api/assets/")) {
+        const address = httpServer.address;
+        if (typeof address === "string" || !("port" in address)) {
+          return yield* new PreviewInvalidUrlError({
+            inputLength: url.length,
+            reason: "unexpected",
+            cause: new Error("The environment has no HTTP listening address"),
+          });
+        }
+        url = `http://${loopbackUrlHostForAddress(address)}:${address.port}${url}`;
+      }
       // Persisted client surfaces must not bind to a different tab after a server restart.
       const tabId = `${newPreviewTabId()}${runtime === "server" ? `_${serverEpoch}` : ""}`;
       const updatedAt = yield* currentIsoTimestamp;
       const snapshot: PreviewSessionSnapshot = {
         threadId: input.threadId,
         tabId,
-        navStatus: input.url
-          ? { _tag: "Loading", url: yield* normalizeUrl(input.url), title: "" }
+        navStatus: url
+          ? { _tag: "Loading", url: yield* normalizeUrl(url), title: "" }
           : { _tag: "Idle" },
         canGoBack: false,
         canGoForward: false,

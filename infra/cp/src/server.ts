@@ -344,9 +344,11 @@ export async function startControlPlaneServer(
   const relayIssuer = options.publicUrl
     ? normalizeRelayIssuer(options.publicUrl)
     : `http://${connectHost}:${actualPort}`;
-  const internalGatewayBaseUrl = `http://127.0.0.1:${actualPort}`;
+  const internalGateway = NodeHttp.createServer();
 
   try {
+    const internalPort = await listenHttpServer(internalGateway, "127.0.0.1", 0);
+    const internalGatewayBaseUrl = `http://127.0.0.1:${internalPort}`;
     const bootEffect = Effect.gen(function* () {
       const scope = yield* Scope.make();
       const memoMap = yield* Layer.makeMemoMap;
@@ -743,24 +745,46 @@ export async function startControlPlaneServer(
       return null;
     };
 
+    internalGateway.on("request", (req, res) => {
+      const match = resolveEndpointKey(req);
+      const path = (req.url ?? "").split("?", 1)[0]?.slice(match?.stripPathPrefix?.length ?? 0);
+      const control =
+        req.method === "POST" &&
+        (path === "/api/t3-connect/health" || path === "/api/t3-connect/mint-credential");
+      const hook =
+        path !== undefined &&
+        ["GET", "POST", "PUT", "PATCH"].includes(req.method ?? "") &&
+        /^\/api\/hooks\/[^/?#]+\/[^/?#]+$/u.test(path);
+      if (!match || (!control && !hook)) {
+        res.writeHead(404).end();
+        return;
+      }
+      void tunnelRegistry
+        .proxyHttpRequest(
+          match.endpointKey,
+          req,
+          res,
+          match.stripPathPrefix ? { stripPathPrefix: match.stripPathPrefix } : {},
+        )
+        .catch(() => {
+          if (!res.headersSent) res.writeHead(502);
+          res.end();
+        });
+    });
+
     httpServer.on("request", (req, res) => {
       const match = resolveEndpointKey(req);
-      if (match !== null) {
-        void tunnelRegistry
-          .proxyHttpRequest(
-            match.endpointKey,
-            req,
-            res,
-            match.stripPathPrefix !== undefined
-              ? { stripPathPrefix: match.stripPathPrefix }
-              : undefined,
-          )
-          .catch(() => {
-            if (!res.headersSent && !res.writableEnded) {
-              res.statusCode = 502;
-              res.end();
-            }
-          });
+      if (match) {
+        const path = (req.url ?? "").slice(match.stripPathPrefix?.length ?? 0);
+        if (req.method === "GET" && path === "/.well-known/cove-tunnel") {
+          if (tunnelRegistry.isEndpointConnected(match.endpointKey)) res.writeHead(200).end();
+          else
+            res
+              .writeHead(503, { "content-type": "application/json" })
+              .end('{"error":"tunnel_unavailable"}');
+        } else {
+          res.writeHead(404, { "content-type": "application/json" }).end('{"error":"not_found"}');
+        }
         return;
       }
 
@@ -779,28 +803,8 @@ export async function startControlPlaneServer(
       })();
     });
 
-    httpServer.on("upgrade", (req, socket: NodeStream.Duplex, head: Buffer) => {
-      const match = resolveEndpointKey(req);
-      if (match !== null) {
-        void tunnelRegistry
-          .proxyUpgrade(
-            match.endpointKey,
-            req,
-            socket,
-            head,
-            match.stripPathPrefix !== undefined
-              ? { stripPathPrefix: match.stripPathPrefix }
-              : undefined,
-          )
-          .catch(() => {
-            if (!socket.destroyed) socket.destroy();
-          });
-        return;
-      }
-      if (!socket.destroyed && socket.writable) {
-        socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-        socket.destroy();
-      }
+    httpServer.on("upgrade", (_req, socket: NodeStream.Duplex) => {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     });
 
     return {
@@ -811,13 +815,13 @@ export async function startControlPlaneServer(
       libp2pPeerId: tunnelRegistry.peerId,
       getLibp2pMultiaddrs: () => tunnelRegistry.getMultiaddrs(),
       stop: async () => {
-        await closeHttpServer(httpServer);
+        await Promise.all([closeHttpServer(httpServer), closeHttpServer(internalGateway)]);
         await disposeWebHandler().catch(() => {});
         await Effect.runPromise(Scope.close(scope, Exit.void)).catch(() => {});
       },
     };
   } catch (error) {
-    await closeHttpServer(httpServer).catch(() => {});
+    await Promise.allSettled([closeHttpServer(httpServer), closeHttpServer(internalGateway)]);
     throw error;
   }
 }

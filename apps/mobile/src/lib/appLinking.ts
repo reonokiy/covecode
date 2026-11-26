@@ -12,7 +12,7 @@ export function shouldHandleAppLink(url: string, cloudConfigured: boolean): bool
   return (
     !route.includes("expo-development-client") &&
     !route.includes("://expo-sharing") &&
-    !/^t3code(-dev|-preview)?:\/*$/.test(url) &&
+    !/^(?:cove|t3)code(-dev|-preview)?:\/*$/.test(route) &&
     (cloudConfigured || !CLOUD_ONLY_LINK_PATH.test(route))
   );
 }
@@ -24,7 +24,7 @@ export function shouldHandleAppLink(url: string, cloudConfigured: boolean): bool
  * path merely ends in one of these names still opens.
  */
 const CLOUD_ONLY_LINK_PATH =
-  /^[a-z][\w+.-]*:\/*(?:[^/]*\/--\/)?(?:connect-onboarding|settings\/(?:auth|waitlist))\/*$/i;
+  /^[a-z][\w+.-]*:\/*(?:[^/]*\/--\/)?(?:connect-onboarding|settings\/waitlist)\/*$/i;
 
 /** Keep the published draft URLs while using the root thread screen. */
 export function restoreDraftLinkState(

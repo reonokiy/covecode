@@ -6,8 +6,9 @@
 
 - **Standard OIDC authentication**: Verifies user Bearer JWTs against any OpenID Connect provider via `.well-known/openid-configuration` discovery and JWKS (Keycloak, Authentik, Authelia, Dex, ZITADEL, Auth0, Okta, Google, etc.), and advertises OIDC configuration at `GET /.well-known/cove-control-plane`.
 - **PostgreSQL storage**: Persists environment links, DPoP replay nonces, managed tunnel allocations, mobile devices, and agent activity state using Drizzle ORM (`infra/cp/migrations/postgres/`).
-- **libp2p v3 tunnel & P2P gateway**: Hosts an in-process `js-libp2p` relay + circuit-relay + HTTP/WS stream bridge (`@covecode/libp2p-tunnel`) replacing legacy tunnel daemons. Traffic reaches environments via `/t/<endpointKey>/...` on a single host/IP or optional wildcard subdomains (`COVE_CP_TUNNEL_BASE_DOMAIN`).
-- **Offline webhook inbox & optional push notifications**: In-process webhook buffering while environments reconnect, plus optional APNs and FCM workers when configured.
+- **Encrypted environment connections.** Clients verify the environment peer ID and try a direct libp2p connection. Circuit Relay v2 carries the encrypted stream when direct connectivity fails. The CP handles discovery, authentication and reachability checks.
+- **Third-party webhooks and rich notifications.** The CP accepts webhook bodies over HTTPS, buffers them while an environment is offline and forwards them to its hook handler. The CP and the configured push provider can read the fields used for lock-screen notifications and Live Activities.
+
 - **No third-party telemetry**: Mobile telemetry ingestion is disabled by default.
 
 ## Code Map
@@ -51,3 +52,9 @@ Copy [`docker-compose.example.yml`](./docker-compose.example.yml) and adjust `CO
 ```sh
 docker compose --env-file infra/cp/.env -f infra/cp/docker-compose.example.yml up --build
 ```
+
+For browser access, serve the web app over HTTPS and advertise a secure WebSocket relay, for example `/dns4/p2p.example.com/tcp/443/tls/ws`. Forward WebSocket upgrades at that hostname to the CP's WebSocket listener (port 4002 by default). Advertise the public TCP listener as well for native clients. The CP includes its peer ID in the discovery response. Keep its data directory on persistent storage.
+
+Give users the HTTPS origin in `COVE_CP_PUBLIC_URL`. Clients fetch `/.well-known/cove-control-plane` there before sign-in. Register the web app’s origin with a trailing slash as an OIDC redirect URI, and `covecode://app/auth/cove` for the desktop app (`covecode-dev://app/auth/cove` for development). Register the mobile app’s Expo redirect URI for its installed variant as well.
+
+On first connection, run `cove connect peer-id` on the environment machine and compare its output with the ID shown by the client. Each client remembers the verified ID.

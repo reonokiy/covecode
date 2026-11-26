@@ -240,7 +240,7 @@ const make = Effect.gen(function* () {
       const normalizedBase = endpointBaseUrl.endsWith("/")
         ? endpointBaseUrl
         : `${endpointBaseUrl}/`;
-      const probeUrl = new URL(".well-known/t3/environment", normalizedBase).toString();
+      const probeUrl = new URL(".well-known/cove-tunnel", normalizedBase).toString();
       const response = yield* httpClient
         .get(probeUrl, { acceptJson: true })
         .pipe(Effect.timeoutOption(ENDPOINT_REQUEST_TIMEOUT));

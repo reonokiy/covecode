@@ -242,6 +242,41 @@
   ],
   "packageOverrides": [
     {
+      "name": "truncate-utf8-bytes",
+      "version": "1.0.2",
+      "noticeFile": "third-party-licenses/truncate-utf8-bytes.txt"
+    },
+    {
+      "name": "it-protobuf-stream",
+      "version": "3.0.1",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
+      "name": "it-length-prefixed-stream",
+      "version": "3.0.1",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
+      "name": "it-byte-stream",
+      "version": "3.0.0",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
+      "name": "@libp2p/webrtc",
+      "version": "6.1.0",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
+      "name": "@libp2p/noise",
+      "version": "17.0.8",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
+      "name": "@libp2p/keychain",
+      "version": "6.1.10",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
       "name": "@chainsafe/libp2p-noise",
       "version": "17.0.0",
       "noticeFile": "third-party-licenses/libp2p-dependencies.txt"

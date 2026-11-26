@@ -66,10 +66,6 @@ function useSettingsListPlacement() {
   return { sidebar, selected };
 }
 
-function SettingsListContent() {
-  return hasCloudPublicConfig() ? <ConfiguredSettingsRouteScreen /> : <LocalSettingsRouteScreen />;
-}
-
 export function SettingsListScreen(props: {
   readonly sidebar: boolean;
   readonly selected: string | null;
@@ -109,7 +105,7 @@ interface SettingsListSection {
   readonly rows: readonly SettingsListRow[];
 }
 
-function ConfiguredSettingsRouteScreen() {
+function SettingsListContent() {
   const gt = useGT();
   const navigation = useNavigation();
   const { isLoaded, isSignedIn, user } = useMobileCloudAuth();
@@ -132,23 +128,17 @@ function ConfiguredSettingsRouteScreen() {
           onPress: () => navigation.navigate("SettingsAuth"),
         },
         environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
-        {
-          id: "SettingsNotifications",
-          icon: "bell.badge",
-          label: gt("Notifications"),
-          target: "SettingsNotifications",
-        },
+        ...(hasCloudPublicConfig()
+          ? [
+              {
+                id: "SettingsNotifications",
+                icon: "bell.badge" as const,
+                label: gt("Notifications"),
+                target: "SettingsNotifications" as const,
+              },
+            ]
+          : []),
       ]}
-    />
-  );
-}
-
-function LocalSettingsRouteScreen() {
-  const gt = useGT();
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  return (
-    <SettingsList
-      connections={[environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length)]}
     />
   );
 }

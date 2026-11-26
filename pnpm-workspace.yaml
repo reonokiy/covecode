@@ -20,6 +20,7 @@ allowBuilds:
   esbuild: true
   # Ships prebuilds; its host-architecture probe triggers source builds during cross-packaging.
   koffi: false
+  node-datachannel: true
   node-pty: true
   # Ships N-API prebuilds; its install script only rebuilds from source.
   objc-js: false
@@ -51,6 +52,8 @@ catalog:
   "@libp2p/interface": 3.4.0
   "@libp2p/peer-id": 6.0.18
   "@libp2p/tcp": 11.0.33
+  "@libp2p/utils": 7.4.6
+  "@libp2p/webrtc": 6.1.0
   "@libp2p/websockets": 10.1.26
   "@multiformats/multiaddr": 13.0.3
   "@noble/curves": 1.9.1

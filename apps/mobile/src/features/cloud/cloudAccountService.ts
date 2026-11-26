@@ -22,6 +22,7 @@ import {
   setAgentAwarenessRelayTokenProvider,
   unregisterAgentAwarenessDeviceForCurrentUser,
 } from "../agent-awareness/remoteRegistration";
+import { cloudDraftOwner } from "./publicConfig";
 import { removeCloudEnvironments } from "./cloud-drafts";
 import { clearConnectOnboardingRequest, requestConnectOnboarding } from "./connectOnboarding";
 
@@ -88,14 +89,16 @@ export const cloudAccountService = createCloudAccountService<OidcSession>({
   },
   // A not-yet-presented onboarding request belongs to the account that left.
   onSignOutTransition: clearConnectOnboardingRequest,
-  cleanUp: ({ source, accountId, wasActive }) => cleanUpCloudAccount(source, accountId, wasActive),
+  cleanUp: ({ source, accountId, wasActive }) =>
+    cleanUpCloudAccount(source, accountId === null ? null : cloudDraftOwner(accountId), wasActive),
   prepare: async ({ source, accountId, isCurrent }) => {
     const storedAccount = await getComposerCloudAccountId();
-    if (storedAccount !== null && storedAccount !== accountId) {
+    const owner = cloudDraftOwner(accountId);
+    if (storedAccount !== null && storedAccount !== owner) {
       await cleanUpCloudAccount(source, storedAccount, false);
     }
     if (!isCurrent()) return;
-    await restoreCloudComposerDrafts(accountId);
+    await restoreCloudComposerDrafts(owner);
   },
   activate: ({ source, accountId, isAccountTransition }) => {
     activateCloudRelayAccount(accountId, oidcTokenReader(source));

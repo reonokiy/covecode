@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 import { noise } from "@chainsafe/libp2p-noise";
@@ -26,6 +27,7 @@ import {
 export interface ClientLibp2pProxyOptions {
   readonly relayMultiaddrs: readonly string[];
   readonly targetPeerId: string;
+  readonly directMultiaddrs?: readonly string[];
   readonly mode?: TunnelTransportMode;
   readonly listenHost?: string;
   readonly listenPort?: number;
@@ -110,10 +112,25 @@ export async function createClientLibp2pProxy(
 
     pendingDial = (async () => {
       let lastError: unknown;
+      if (mode === "p2p") {
+        const direct = (options.directMultiaddrs ?? [])
+          .filter(
+            (address) =>
+              !address.includes("/p2p-circuit") && address.endsWith(`/p2p/${targetPeer}`),
+          )
+          .map((address) => multiaddr(address));
+        if (direct.length) {
+          try {
+            return await node.dial(direct, { signal: AbortSignal.timeout(2000) });
+          } catch (error) {
+            lastError = error;
+          }
+        }
+      }
       for (const relayAddr of options.relayMultiaddrs) {
         const circuitAddr = buildCircuitTargetMultiaddr(relayAddr, options.targetPeerId);
         try {
-          return await node.dial(multiaddr(circuitAddr));
+          return await node.dial(multiaddr(circuitAddr), { signal: AbortSignal.timeout(10_000) });
         } catch (error) {
           lastError = error;
         }
@@ -135,13 +152,22 @@ export async function createClientLibp2pProxy(
     });
   };
 
+  const prefix = `/.cove-tunnel/${NodeCrypto.randomUUID().replaceAll("-", "")}`;
+  const localSockets = new Set<NodeNet.Socket>();
+  const allowed = (req: NodeHttp.IncomingMessage) =>
+    req.headers.host === authority && req.url?.startsWith(prefix + "/");
   const server = NodeHttp.createServer((req, res) => {
+    if (!allowed(req)) {
+      res.writeHead(404).end();
+      return;
+    }
     void openTargetStream()
       .then((stream) =>
         proxyHttpRequestOverStream({
           stream,
           req,
           res,
+          stripPathPrefix: prefix,
         }),
       )
       .catch((error) => {
@@ -158,7 +184,15 @@ export async function createClientLibp2pProxy(
       });
   });
 
+  server.on("connection", (socket) => {
+    localSockets.add(socket);
+    socket.once("close", () => localSockets.delete(socket));
+  });
   server.on("upgrade", (req, socket, head) => {
+    if (!allowed(req)) {
+      socket.destroy();
+      return;
+    }
     void openTargetStream()
       .then((stream) =>
         proxyUpgradeOverStream({
@@ -166,6 +200,7 @@ export async function createClientLibp2pProxy(
           req,
           socket,
           head,
+          stripPathPrefix: prefix,
         }),
       )
       .catch(() => {
@@ -173,12 +208,16 @@ export async function createClientLibp2pProxy(
       });
   });
 
+  let authority = "";
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.listenPort ?? 0, options.listenHost ?? "127.0.0.1", () => {
       server.removeListener("error", reject);
       resolve();
     });
+  }).catch(async (error) => {
+    await node.stop();
+    throw error;
   });
 
   const address = server.address() as NodeNet.AddressInfo | null;
@@ -188,8 +227,9 @@ export async function createClientLibp2pProxy(
   }
 
   const host = address.address === "::" ? "127.0.0.1" : address.address;
-  const httpBaseUrl = `http://${host}:${address.port}`;
-  const wsBaseUrl = `ws://${host}:${address.port}`;
+  authority = `${host}:${address.port}`;
+  const httpBaseUrl = `http://${authority}${prefix}`;
+  const wsBaseUrl = `ws://${authority}${prefix}`;
 
   return {
     httpBaseUrl,
@@ -202,6 +242,7 @@ export async function createClientLibp2pProxy(
     },
     getActiveTransport,
     stop: async () => {
+      for (const socket of localSockets) socket.destroy();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
       });

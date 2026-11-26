@@ -66,6 +66,33 @@ describe("DpopProof", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect.each([
+    [
+      "http://127.0.0.1:49152/.cove-tunnel/0123456789abcdef0123456789abcdef/oauth/token",
+      "http://127.0.0.1:49152/oauth/token",
+    ],
+    [
+      "https://0123456789abcdef0123456789abcdef.cove.invalid/oauth/token",
+      "http://cove.invalid/oauth/token",
+    ],
+  ] as const)(
+    "binds the proof for %s to the URL received by the environment",
+    ([client, environment]) =>
+      Effect.gen(function* () {
+        const key = yield* webCryptoProofKey;
+        yield* TestClock.setTime(1_700_000_000_000);
+        const proof = yield* DpopProof.createProof({ key, method: "POST", url: client });
+        expect(
+          verifyDpopProof({
+            proof,
+            method: "POST",
+            url: environment,
+            nowEpochSeconds: 1_700_000_000,
+          }),
+        ).toMatchObject({ ok: true });
+      }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("rejects an unparseable URL before signing", () =>
     Effect.gen(function* () {
       const key = yield* webCryptoProofKey;

@@ -1,4 +1,6 @@
 export {
+  ENVIRONMENT_PEER_KEY_FILE,
+  environmentPeerIdFromKey,
   COVE_TUNNEL_PROTOCOL,
   COVE_TUNNEL_REGISTER_PROTOCOL,
   Libp2pStreamDuplex,

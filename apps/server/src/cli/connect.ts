@@ -780,6 +780,24 @@ const connectPublishCommand = Command.make("publish", {
   ),
 );
 
+export const connectPeerIdCommand = Command.make("peer-id", { ...projectLocationFlags }).pipe(
+  Command.withDescription("Show this environment's libp2p identity for device pairing."),
+  Command.withHandler(
+    Effect.fn("cloud.cli.peerId")(function* (flags) {
+      const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel, {
+        quietLogs: true,
+      });
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { ENVIRONMENT_PEER_KEY_FILE, environmentPeerIdFromKey } = yield* Effect.promise(
+        () => import("@covecode/libp2p-tunnel"),
+      );
+      const key = yield* fs.readFile(path.join(config.stateDir, ENVIRONMENT_PEER_KEY_FILE));
+      yield* Console.log(environmentPeerIdFromKey(key));
+    }),
+  ),
+);
+
 const connectUnlinkCommand = Command.make("unlink", {
   ...projectLocationFlags,
 }).pipe(
@@ -801,6 +819,7 @@ const connectLogoutCommand = Command.make("logout", {
 // `t3 connect` itself is `t3 up --connect`, in up.ts.
 export const connectSubcommands = [
   connectLoginCommand,
+  connectPeerIdCommand,
   connectLinkCommand,
   connectPublishCommand,
   connectStatusCommand,

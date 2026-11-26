@@ -21,6 +21,7 @@ import { WorkspacePageHeader } from "./WorkspacePageHeader";
 /** Home screen for the hosted app before any computer is added. */
 export function HostedEmptyState() {
   const cloudEnabled = hasCloudPublicConfig();
+  const { openAuthPrompt } = useCloudAuthPrompt();
   const localEnvironmentOff = isLocalEnvironmentDisabled();
 
   return (
@@ -55,9 +56,16 @@ export function HostedEmptyState() {
                 <T>Open Environments</T>
               </Button>
             ) : (
-              <ol className="w-full space-y-4 text-left">
-                {cloudEnabled ? <T3ConnectSteps /> : <PairingSteps />}
-              </ol>
+              <>
+                <ol className="w-full space-y-4 text-left">
+                  {cloudEnabled ? <T3ConnectSteps /> : <PairingSteps />}
+                </ol>
+                {!cloudEnabled && (
+                  <Button variant="outline" onClick={openAuthPrompt}>
+                    <T>Sign in to T3 Connect</T>
+                  </Button>
+                )}
+              </>
             )}
           </EmptyContent>
         </Empty>

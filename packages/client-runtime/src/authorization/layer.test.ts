@@ -106,9 +106,11 @@ const persistedToken = (
     readonly accessToken?: string;
     readonly expiresAtEpochMs?: number;
     readonly dpopThumbprint?: string;
+    readonly controlPlaneUrl?: string;
   } = {},
 ) =>
   new TokenStore.RemoteDpopAccessToken({
+    controlPlaneUrl: input.controlPlaneUrl ?? "https://relay.example.test",
     environmentId: input.environmentId ?? ENVIRONMENT_ID,
     accountId: "account-1",
     label: DESCRIPTOR.label,
@@ -124,6 +126,7 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
   /** Answers every descriptor read, so one that runs beside a ticket does not shift `responses`. */
   readonly descriptor?: object;
   readonly bootstrap?: RelayEnvironmentConnectResponse;
+  readonly tunnels?: ManagedRelay.ManagedRelayClient["Service"]["tunnels"];
   readonly beforeBootstrap?: Effect.Effect<void, ManagedRelay.ManagedRelayClientError>;
   readonly beforePut?: Effect.Effect<void>;
   readonly clerkToken?: ClientCapabilities.CloudSession["Service"]["clerkToken"];
@@ -186,6 +189,7 @@ const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (
   });
   const unexpected = () => Effect.die("Unexpected relay request");
   const relay = ManagedRelay.ManagedRelayClient.of({
+    ...(input.tunnels ? { tunnels: input.tunnels } : {}),
     relayUrl: "https://relay.example.test",
     listEnvironments: unexpected,
     listDevices: unexpected,
@@ -610,9 +614,59 @@ describe("RemoteEnvironmentAuthorization", () => {
     }),
   );
 
+  it.effect(
+    "opens the verified tunnel before credential exchange and ignores a learned plaintext route",
+    () =>
+      Effect.gen(function* () {
+        const endpoint = {
+          ...ENDPOINT,
+          providerKind: "libp2p_tunnel" as const,
+          libp2pPeerId: "pinned",
+          libp2pRelayMultiaddrs: ["relay"],
+        };
+        const route = {
+          httpBaseUrl: "https://verified.invalid/",
+          wsBaseUrl: "wss://verified.invalid/ws",
+        };
+        const harness = yield* makeHarness({
+          initialToken: persistedToken(),
+          bootstrap: { ...BOOTSTRAP, endpoint },
+          tunnels: {
+            prepare: async (_, received) => {
+              expect(received).toEqual(endpoint);
+              return route;
+            },
+            clear: () => {},
+          },
+          descriptor: DESCRIPTOR,
+          responses: [
+            accessToken("private-access"),
+            websocketTicket("private-ticket"),
+            websocketTicket("cached-ticket"),
+          ],
+        });
+        yield* Effect.gen(function* () {
+          const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+          for (const ticket of ["private-ticket", "cached-ticket"]) {
+            const connection = yield* remote.authorizeDpop({
+              expectedEnvironmentId: ENVIRONMENT_ID,
+              directEndpoint: ENDPOINT,
+            });
+            expect(connection.socketUrl).toContain(route.wsBaseUrl + "?wsTicket=" + ticket);
+          }
+        }).pipe(Effect.provide(harness.layer));
+        expect(yield* Ref.get(harness.bootstrapCalls)).toBe(1);
+        expect(
+          harness.fetch.calls.every(([url]) => String(url).startsWith(route.httpBaseUrl)),
+        ).toBe(true);
+        expect((yield* Ref.get(harness.tokens)).get(ENVIRONMENT_ID)?.endpoint).toEqual(endpoint);
+      }),
+  );
+
   it.effect("reuses a same-account persisted environment token without contacting the relay", () =>
     Effect.gen(function* () {
       const cached = new TokenStore.RemoteDpopAccessToken({
+        controlPlaneUrl: "https://relay.example.test",
         environmentId: ENVIRONMENT_ID,
         accountId: "account-1",
         label: DESCRIPTOR.label,
@@ -649,6 +703,7 @@ describe("RemoteEnvironmentAuthorization", () => {
   it.effect("uses the T3 Connect token on a learned direct address without the relay", () =>
     Effect.gen(function* () {
       const cached = new TokenStore.RemoteDpopAccessToken({
+        controlPlaneUrl: "https://relay.example.test",
         environmentId: ENVIRONMENT_ID,
         accountId: "account-1",
         label: DESCRIPTOR.label,
@@ -718,6 +773,7 @@ describe("RemoteEnvironmentAuthorization", () => {
   it.effect("refreshes and persists an expired environment token", () =>
     Effect.gen(function* () {
       const expired = new TokenStore.RemoteDpopAccessToken({
+        controlPlaneUrl: "https://relay.example.test",
         environmentId: ENVIRONMENT_ID,
         accountId: "account-1",
         label: DESCRIPTOR.label,
@@ -931,6 +987,7 @@ describe("RemoteEnvironmentAuthorization", () => {
   it.effect("evicts an auth-invalid cached token and obtains a fresh bootstrap", () =>
     Effect.gen(function* () {
       const cached = new TokenStore.RemoteDpopAccessToken({
+        controlPlaneUrl: "https://relay.example.test",
         environmentId: ENVIRONMENT_ID,
         accountId: "account-1",
         label: DESCRIPTOR.label,
@@ -971,6 +1028,7 @@ describe("RemoteEnvironmentAuthorization", () => {
   it.effect("refreshes a cached endpoint after its first transient failure", () =>
     Effect.gen(function* () {
       const cached = new TokenStore.RemoteDpopAccessToken({
+        controlPlaneUrl: "https://relay.example.test",
         environmentId: ENVIRONMENT_ID,
         accountId: "account-1",
         label: DESCRIPTOR.label,
@@ -1272,6 +1330,7 @@ describe("RemoteEnvironmentAuthorization", () => {
   it.effect("renews a legacy unowned token once and reuses its account-bound replacement", () =>
     Effect.gen(function* () {
       const legacy = new TokenStore.RemoteDpopAccessToken({
+        controlPlaneUrl: "https://relay.example.test",
         environmentId: ENVIRONMENT_ID,
         label: DESCRIPTOR.label,
         endpoint: ENDPOINT,
@@ -1312,6 +1371,27 @@ describe("RemoteEnvironmentAuthorization", () => {
       }).pipe(Effect.provide(harness.layer));
       expect(yield* Ref.get(harness.bootstrapCalls)).toBe(1);
     }),
+  );
+
+  it.effect(
+    "mints a fresh environment credential after switching control panels with the same account and key",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          initialToken: persistedToken({ controlPlaneUrl: "https://previous.test" }),
+          responses: [Response.json(DESCRIPTOR), accessToken("selected-panel-token")],
+        });
+        const auth = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization.pipe(
+          Effect.flatMap((remote) =>
+            remote.authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID }),
+          ),
+          Effect.provide(harness.layer),
+        );
+        expect(auth.httpAuthorization.accessToken).toBe("selected-panel-token");
+        expect((yield* Ref.get(harness.tokens)).get(ENVIRONMENT_ID)?.controlPlaneUrl).toBe(
+          "https://relay.example.test",
+        );
+      }),
   );
 
   it.effect("renews a cached credential bound to a different signing key", () =>

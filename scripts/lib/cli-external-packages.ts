@@ -6,6 +6,9 @@ const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   // Playwright reads package.json and browsers.json beside its runtime modules.
   "playwright-core",
   "node-pty",
+  "node-datachannel",
+  "@node-datachannel/",
+  "detect-libc",
   "ffi-rs",
   "@yuuang/",
   "@ff-labs/",

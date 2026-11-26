@@ -7,7 +7,7 @@ import {
   EnvironmentId,
   type ExecutionEnvironmentDescriptor,
 } from "@t3tools/contracts";
-import { RelayEnvironmentConnectScope } from "@t3tools/contracts/relay";
+import { type RelayManagedEndpoint, RelayEnvironmentConnectScope } from "@t3tools/contracts/relay";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import {
@@ -375,6 +375,28 @@ export const make = Effect.gen(function* () {
     return connected;
   });
 
+  const prepareEndpoint = Effect.fn("environment.tunnel.prepare")(function* (
+    id: EnvironmentId,
+    endpoint: RelayManagedEndpoint,
+  ) {
+    if (endpoint.providerKind !== "libp2p_tunnel" && !relay.tunnels) return endpoint;
+    const tunnels = relay.tunnels;
+    if (!tunnels)
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        ...translatableDetail(msg("Encrypted environment transport is unavailable.")),
+      });
+    const route = yield* Effect.tryPromise({
+      try: () => tunnels.prepare(id, endpoint),
+      catch: () =>
+        new ConnectionTransientError({
+          reason: "network",
+          ...translatableDetail(msg("Could not open the encrypted environment connection.")),
+        }),
+    });
+    return { ...endpoint, httpBaseUrl: route.httpBaseUrl, wsBaseUrl: route.wsBaseUrl };
+  });
+
   const exchangeDpopToken = Effect.fn("clientRuntime.connection.remote.exchangeDpopToken")(
     function* (
       environmentId: EnvironmentId,
@@ -382,7 +404,8 @@ export const make = Effect.gen(function* () {
       identity: ClientCapabilities.CloudSessionIdentity,
     ) {
       const bootstrap = yield* obtainBootstrap(environmentId, identity);
-      const descriptor = yield* fetchDescriptor(bootstrap.endpoint.httpBaseUrl, "relay").pipe(
+      const route = yield* prepareEndpoint(environmentId, bootstrap.endpoint);
+      const descriptor = yield* fetchDescriptor(route.httpBaseUrl, "relay").pipe(
         Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.withSpan("environment.authorization.descriptor"),
       );
@@ -395,7 +418,7 @@ export const make = Effect.gen(function* () {
       const bootstrapProof = yield* signer
         .createProof({
           method: "POST",
-          url: environmentEndpointUrl(bootstrap.endpoint.httpBaseUrl, "/oauth/token"),
+          url: environmentEndpointUrl(route.httpBaseUrl, "/oauth/token"),
         })
         .pipe(
           Effect.mapError(
@@ -408,7 +431,7 @@ export const make = Effect.gen(function* () {
         );
       yield* assertSession(identity);
       const access = yield* exchangeRemoteDpopAccessToken({
-        httpBaseUrl: bootstrap.endpoint.httpBaseUrl,
+        httpBaseUrl: route.httpBaseUrl,
         credential: bootstrap.credential,
         dpopProof: bootstrapProof,
         clientMetadata: presentation.metadata,
@@ -425,6 +448,7 @@ export const make = Effect.gen(function* () {
       const token = new TokenStore.RemoteDpopAccessToken({
         environmentId: descriptor.environmentId,
         accountId: identity.accountId,
+        controlPlaneUrl: relay.relayUrl,
         label: descriptor.label,
         endpoint: bootstrap.endpoint,
         accessToken: access.access_token,
@@ -435,7 +459,7 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const getDpopToken = Effect.fn("clientRuntime.connection.remote.getDpopToken")(function* (
+  const readDpopToken = Effect.fn("clientRuntime.connection.remote.readDpopToken")(function* (
     input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDpopHttp"]>[0],
   ) {
     const session = yield* cloudSession.identity;
@@ -465,7 +489,11 @@ export const make = Effect.gen(function* () {
           Option.isSome(cached) &&
           cached.value.environmentId === input.expectedEnvironmentId &&
           cached.value.accountId === identity.accountId &&
+          cached.value.controlPlaneUrl === relay.relayUrl &&
           cached.value.dpopThumbprint === thumbprint &&
+          (!relay.tunnels ||
+            (cached.value.endpoint.providerKind === "libp2p_tunnel" &&
+              !!cached.value.endpoint.libp2pPeerId)) &&
           cached.value.expiresAtEpochMs > now + DPOP_ACCESS_TOKEN_REFRESH_SKEW_MS &&
           cached.value.accessToken !== input.rejectedAccessToken &&
           (owner?.accessToken !== cached.value.accessToken || owner.identity === identity)
@@ -550,6 +578,29 @@ export const make = Effect.gen(function* () {
     const issued = yield* selected.issued;
     yield* assertSession(identity);
     return { ...issued, fromCache: selected.fromCache, identity };
+  });
+
+  const getDpopToken = Effect.fn("clientRuntime.connection.remote.getDpopToken")(function* (
+    input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDpopHttp"]>[0],
+  ) {
+    let issued = yield* readDpopToken(input);
+    const prepare = () => prepareEndpoint(input.expectedEnvironmentId, issued.token.endpoint);
+    let route = yield* prepare().pipe(Effect.result);
+    if (
+      Result.isFailure(route) &&
+      issued.fromCache &&
+      route.failure._tag === "ConnectionTransientError"
+    ) {
+      yield* assertSession(issued.identity);
+      issued = yield* readDpopToken({ ...input, rejectedAccessToken: issued.token.accessToken });
+      route = yield* prepare().pipe(Effect.result);
+    }
+    if (Result.isFailure(route)) return yield* route.failure;
+    yield* assertSession(issued.identity);
+    return {
+      ...issued,
+      token: new TokenStore.RemoteDpopAccessToken({ ...issued.token, endpoint: route.success }),
+    };
   });
 
   const proofError = (detail: string) => () =>
@@ -683,7 +734,7 @@ export const make = Effect.gen(function* () {
   const authorizeDpop = Effect.fn("clientRuntime.connection.remote.authorizeDpop")(function* (
     input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDpop"]>[0],
   ) {
-    const endpoint = input.directEndpoint;
+    const endpoint = relay.tunnels ? undefined : input.directEndpoint;
     const directDescriptor =
       endpoint === undefined
         ? undefined

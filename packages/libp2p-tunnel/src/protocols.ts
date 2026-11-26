@@ -1,8 +1,14 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeStream from "node:stream";
+import { peerIdFromPrivateKey } from "@libp2p/peer-id";
 import { keys } from "@libp2p/crypto";
 import type { PrivateKey, Stream, StreamCloseEvent, StreamMessageEvent } from "@libp2p/interface";
+
+export const ENVIRONMENT_PEER_KEY_FILE = "libp2p-environment.key";
+export function environmentPeerIdFromKey(bytes: Uint8Array): string {
+  return peerIdFromPrivateKey(keys.privateKeyFromProtobuf(bytes)).toString();
+}
 
 export const COVE_TUNNEL_PROTOCOL = "/cove/http-tunnel/1.0.0";
 export const COVE_TUNNEL_REGISTER_PROTOCOL = "/cove/tunnel-register/1.0.0";

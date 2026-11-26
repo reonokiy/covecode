@@ -422,16 +422,18 @@ const make = Effect.gen(function* () {
     if (endpoint.providerKind !== "libp2p_tunnel" || !allocation) return endpoint;
     const key = endpointKeyFromTunnelName(namespace, allocation.tunnelName);
     const registration = key && tunnelRegistry ? tunnelRegistry.getEndpointRegistration(key) : null;
-    const configuredAnnounce = settings.libp2p?.announceMultiaddrs ?? [];
-    const announceAddrs =
-      configuredAnnounce.length > 0
-        ? [...configuredAnnounce]
-        : tunnelRegistry
-          ? [...tunnelRegistry.getMultiaddrs()]
-          : [];
+    const announceAddrs = Libp2pTunnelRegistry.advertisedRelayMultiaddrs(
+      settings.libp2p?.announceMultiaddrs ?? [],
+      tunnelRegistry,
+    );
     return {
       ...endpoint,
-      ...(registration ? { libp2pPeerId: registration.peerId } : {}),
+      ...(registration
+        ? {
+            libp2pPeerId: registration.peerId,
+            libp2pDirectMultiaddrs: registration.directMultiaddrs,
+          }
+        : {}),
       ...(announceAddrs.length > 0 ? { libp2pRelayMultiaddrs: announceAddrs } : {}),
       ...(settings.libp2p?.enabled ? { transportMode: "p2p" as const } : {}),
     };

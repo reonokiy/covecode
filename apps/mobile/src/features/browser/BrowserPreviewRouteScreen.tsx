@@ -1,9 +1,10 @@
+import { previewPdfAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { SheetHeader } from "../../components/ui/SheetHeader";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import * as Dialog from "../../components/ui/Dialog";
 import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { normalizePreviewUrl, previewPdfAssetUrl } from "@t3tools/shared/preview";
+import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import * as Option from "effect/Option";
 import { msg, useGT, useMessages } from "gt-react-native";
 import { useEffect, useRef, useState } from "react";

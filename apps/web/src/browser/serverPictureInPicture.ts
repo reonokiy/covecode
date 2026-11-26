@@ -5,7 +5,7 @@ import {
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { previewPdfAssetUrl } from "@t3tools/shared/preview";
+import { previewPdfAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { useSyncExternalStore } from "react";
 
 import { readPreviewStreamAccess } from "~/state/previewStream";

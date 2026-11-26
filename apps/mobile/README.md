@@ -3,6 +3,8 @@
 > [!NOTE]
 > To install the released app from the App Store or Google Play, see [Mobile app](../../docs/user/install.md#mobile-app). This guide covers building it from source.
 
+Building the native client locally requires Cargo and rustup. The build adds the Rust target for the selected iOS architecture or Android ABI and compiles the environment transport with Xcode or the Android NDK.
+
 ## Quickstart
 
 > [!NOTE]

@@ -4,6 +4,7 @@ import {
   type RelayManagedEndpointRuntimeConfig,
 } from "@t3tools/contracts/relay";
 import {
+  ENVIRONMENT_PEER_KEY_FILE,
   createEnvironmentLibp2pTunnel,
   type EnvironmentLibp2pTunnel,
   type EnvironmentLibp2pTunnelOptions,
@@ -411,7 +412,7 @@ export const make = Effect.fn("CloudManagedEndpointRuntime.make")(function* (fac
       (relayUrl !== null ? `${relayUrl.replace(/\/+$/u, "")}/t/${endpointKey}/` : null);
     const hostname = extractUrlHost(publicHttpBaseUrl);
     const originUrl = formatOriginUrl(origin);
-    const keyPath = path.join(serverConfig.stateDir, "libp2p-environment.key");
+    const keyPath = path.join(serverConfig.stateDir, ENVIRONMENT_PEER_KEY_FILE);
 
     let stopped = false;
     let attached = false;

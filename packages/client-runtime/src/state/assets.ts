@@ -1,3 +1,5 @@
+import { previewPdfAssetUrl as resolvePreviewPdf } from "@t3tools/shared/preview";
+import { resolveTunnelResource } from "../environment/tunnelUrl.ts";
 import {
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
@@ -57,9 +59,15 @@ function parseAssetCollectionKey(
   }
 }
 
+export const previewPdfAssetUrl = (source: string, base: string | null) =>
+  resolvePreviewPdf(source, base, resolveTunnelResource);
+
 export function resolveAssetUrl(httpBaseUrl: string, relativeUrl: string): string | null {
   try {
-    return new URL(relativeUrl, httpBaseUrl).toString();
+    return (
+      resolveTunnelResource(httpBaseUrl, relativeUrl) ??
+      new URL(relativeUrl, httpBaseUrl).toString()
+    );
   } catch {
     return null;
   }
@@ -285,7 +293,10 @@ export function createAssetEnvironmentAtoms<R, E>(
     const asset = yield* registry
       .run(local.environmentId, mint(local.environmentId, input))
       .pipe(Effect.catchCause((cause) => Effect.failCause(Cause.map(cause, () => error))));
-    return { ...asset, relativeUrl: new URL(asset.relativeUrl, local.httpBaseUrl).href };
+    return {
+      ...asset,
+      relativeUrl: resolveAssetUrl(local.httpBaseUrl, asset.relativeUrl) ?? asset.relativeUrl,
+    };
   });
   const createUrl = createEnvironmentQueryAtomFamily(runtime, {
     label: "environment-data:assets:create-url",

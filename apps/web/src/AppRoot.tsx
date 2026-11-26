@@ -1,3 +1,4 @@
+import { ControlPlaneDialog } from "./cloud/ControlPlaneDialog";
 import { RouterProvider } from "@tanstack/react-router";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
@@ -14,6 +15,7 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
         <RouterProvider router={router} />
         <ElectronBrowserHost />
         <QuitHoldOverlay />
+        <ControlPlaneDialog />
       </AppAtomRegistryProvider>
     </I18nProvider>
   );

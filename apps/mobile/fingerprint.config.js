@@ -14,5 +14,19 @@ if (!majorVersion) {
 
 module.exports = {
   nativeModuleSourceType: "files",
-  extraSources: [{ type: "contents", id: "appMajorVersion", contents: majorVersion }],
+  extraSources: [
+    { type: "contents", id: "appMajorVersion", contents: majorVersion },
+    ...[
+      "Cargo.toml",
+      "Cargo.lock",
+      "src/lib.rs",
+      "src/bridge.rs",
+      "src/proxy.rs",
+      "src/streams.rs",
+    ].map((name) => ({
+      type: "file",
+      filePath: "../../native/cove-p2p/" + name,
+      reasons: ["Cove native tunnel"],
+    })),
+  ],
 };

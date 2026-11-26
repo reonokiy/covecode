@@ -11,6 +11,7 @@ export class RemoteDpopAccessToken extends Schema.Class<RemoteDpopAccessToken>(
   "@t3tools/client-runtime/authorization/RemoteDpopAccessToken",
 )({
   environmentId: EnvironmentId,
+  controlPlaneUrl: Schema.optionalKey(Schema.String),
   accountId: Schema.optionalKey(Schema.String),
   label: Schema.String,
   endpoint: RelayManagedEndpoint,

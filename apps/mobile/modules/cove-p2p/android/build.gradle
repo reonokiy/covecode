@@ -1,0 +1,28 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+android {
+  namespace 'expo.modules.covep2p'
+  compileSdk rootProject.ext.compileSdkVersion
+  ndkVersion rootProject.ext.ndkVersion
+  defaultConfig {
+    minSdkVersion rootProject.ext.minSdkVersion
+    consumerProguardFiles 'consumer-rules.pro'
+  }
+  sourceSets.main.jniLibs.srcDir(layout.buildDirectory.dir('coveJni'))
+}
+dependencies { implementation project(':expo-modules-core') }
+
+def rustRoot = file('../../../../../native/cove-p2p')
+def architectures = (findProperty('reactNativeArchitectures') ?: 'armeabi-v7a,arm64-v8a,x86,x86_64').split(',')
+def rustTask = tasks.register('buildCoveRust', Exec) {
+  inputs.files(fileTree(rustRoot) { exclude 'target/**' }, file('../build-native.sh'))
+  inputs.property('abis', architectures.join(','))
+  outputs.dir(layout.buildDirectory.dir('coveJni'))
+  doFirst {
+    commandLine(['bash', file('../build-native.sh'), 'android',
+      androidComponents.sdkComponents.ndkDirectory.get().asFile.absolutePath,
+      layout.buildDirectory.dir('coveJni').get().asFile.absolutePath] + architectures.toList())
+  }
+}
+tasks.named('preBuild').configure { dependsOn rustTask }

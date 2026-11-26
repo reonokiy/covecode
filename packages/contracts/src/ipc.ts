@@ -1120,6 +1120,12 @@ export interface DesktopBridge {
   getLocalEnvironmentBearerToken: () => Promise<string>;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
+  openEnvironmentTunnel?: (input: {
+    readonly peerId: string;
+    readonly direct: readonly string[];
+    readonly relays: readonly string[];
+  }) => Promise<string>;
+  closeEnvironmentTunnel?: (url: string) => Promise<void>;
   getConnectionCatalog: () => Promise<string | null>;
   setConnectionCatalog: (catalog: string) => Promise<boolean>;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;

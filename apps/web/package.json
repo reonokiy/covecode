@@ -20,6 +20,7 @@
     "@betteroffice/fonts-cjk": "0.4.0",
     "@betteroffice/pptx": "0.5.1",
     "@betteroffice/xlsx": "0.5.1",
+    "@covecode/libp2p-tunnel": "workspace:*",
     "@daypicker/react": "^10.0.1",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",

@@ -48,6 +48,7 @@ export interface RelayRegisteredEndpoint {
   readonly endpointId: string;
   readonly peerId: string;
   readonly connectedAt: number;
+  readonly directMultiaddrs: readonly string[];
 }
 
 interface InternalRegistrationRecord {
@@ -55,12 +56,14 @@ interface InternalRegistrationRecord {
   readonly endpointId: string;
   readonly peerId: PeerId;
   readonly connectedAt: number;
+  readonly directMultiaddrs: readonly string[];
 }
 
 interface RegisterMessagePayload {
   readonly endpointId?: unknown;
   readonly endpointKey?: unknown;
   readonly connectorToken?: unknown;
+  readonly directMultiaddrs?: unknown;
 }
 
 export interface RelayLibp2pNode {
@@ -166,6 +169,17 @@ export async function createRelayLibp2pNode(
           endpointId,
           peerId: connection.remotePeer,
           connectedAt: Date.now(),
+          directMultiaddrs: Array.isArray(message.directMultiaddrs)
+            ? message.directMultiaddrs
+                .slice(0, 16)
+                .filter(
+                  (a): a is string =>
+                    typeof a === "string" &&
+                    a.length < 1024 &&
+                    a.endsWith(`/p2p/${connection.remotePeer}`) &&
+                    !a.includes("/p2p-circuit"),
+                )
+            : [],
         };
         registrations.set(endpointKey, record);
         options.onEndpointRegistered?.({
@@ -173,6 +187,7 @@ export async function createRelayLibp2pNode(
           endpointId: record.endpointId,
           peerId: record.peerId.toString(),
           connectedAt: record.connectedAt,
+          directMultiaddrs: record.directMultiaddrs,
         });
         await writeJsonLine(stream, { ok: true });
       } catch (error) {
@@ -217,6 +232,7 @@ export async function createRelayLibp2pNode(
         endpointId: entry.endpointId,
         peerId: entry.peerId.toString(),
         connectedAt: entry.connectedAt,
+        directMultiaddrs: entry.directMultiaddrs,
       };
     },
     isEndpointConnected: (endpointKey) => {

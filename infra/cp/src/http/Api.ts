@@ -439,8 +439,10 @@ export const layerMetadataApi = HttpApiBuilder.group(
         }),
       )
       .handle("controlPlaneConfig", () => {
-        const announced = settings.libp2p?.announceMultiaddrs ?? [];
-        const liveAddrs = tunnelRegistry ? tunnelRegistry.getMultiaddrs() : [];
+        const relayMultiaddrs = Libp2pTunnelRegistry.advertisedRelayMultiaddrs(
+          settings.libp2p?.announceMultiaddrs ?? [],
+          tunnelRegistry,
+        );
         return Effect.succeed({
           controlPlaneUrl: issuer,
           oidc: settings.oidc
@@ -454,7 +456,7 @@ export const layerMetadataApi = HttpApiBuilder.group(
           libp2p: {
             enabled: Boolean(settings.libp2p?.enabled),
             peerId: tunnelRegistry?.peerId ?? null,
-            relayMultiaddrs: announced.length > 0 ? [...announced] : [...liveAddrs],
+            relayMultiaddrs,
           },
         });
       });
@@ -831,9 +833,10 @@ export const layerClientApi = HttpApiBuilder.group(
           if (!tunnelRegistry) {
             return { environments };
           }
-          const announced = config.libp2p?.announceMultiaddrs ?? [];
-          const relayMultiaddrs =
-            announced.length > 0 ? [...announced] : [...tunnelRegistry.getMultiaddrs()];
+          const relayMultiaddrs = Libp2pTunnelRegistry.advertisedRelayMultiaddrs(
+            config.libp2p?.announceMultiaddrs ?? [],
+            tunnelRegistry,
+          );
           return {
             environments: environments.map((env) => {
               if (env.endpoint.providerKind !== "libp2p_tunnel") return env;
@@ -855,7 +858,12 @@ export const layerClientApi = HttpApiBuilder.group(
                 ...env,
                 endpoint: {
                   ...env.endpoint,
-                  ...(registration ? { libp2pPeerId: registration.peerId } : {}),
+                  ...(registration
+                    ? {
+                        libp2pPeerId: registration.peerId,
+                        libp2pDirectMultiaddrs: registration.directMultiaddrs,
+                      }
+                    : {}),
                   ...(relayMultiaddrs.length > 0 ? { libp2pRelayMultiaddrs: relayMultiaddrs } : {}),
                   ...(config.libp2p?.enabled ? { transportMode: "p2p" as const } : {}),
                 },

@@ -1,3 +1,5 @@
+import * as NetAddress from "effect/net/NetAddress";
+import * as HttpServer from "effect/http/HttpServer";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -52,7 +54,10 @@ it.effect.each([
     };
     const manager = yield* Preview.make.pipe(
       Effect.provide(
-        Layer.merge(
+        Layer.mergeAll(
+          Layer.mock(HttpServer.HttpServer)({
+            address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
+          }),
           ServerConfig.layerTest(process.cwd(), { prefix: "t3-preview-controls-" }).pipe(
             Layer.provide(NodeServices.layer),
           ),

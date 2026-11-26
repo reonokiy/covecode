@@ -7,12 +7,6 @@ import { useCloudAuthPrompt } from "../../cloud/useCloudAuthPrompt";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { useT3ConnectAccountPage } from "./T3ConnectAccountPages";
 
-export function T3ConnectSidebarSignIn() {
-  if (!hasCloudPublicConfig()) return null;
-
-  return <ConfiguredT3ConnectSidebarSignIn />;
-}
-
 export function T3ConnectSidebarAvatar() {
   if (!hasCloudPublicConfig()) return null;
 
@@ -40,7 +34,7 @@ function ConfiguredT3ConnectSidebarAvatar() {
   );
 }
 
-function ConfiguredT3ConnectSidebarSignIn() {
+export function T3ConnectSidebarSignIn() {
   const { isLoaded, isSignedIn, loadFailed } = useCloudAuth();
   const { openAuthPrompt } = useCloudAuthPrompt();
 
