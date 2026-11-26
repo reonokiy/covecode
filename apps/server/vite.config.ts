@@ -41,7 +41,9 @@ if (!TELEMETRY_CHANNELS.includes(telemetryChannel)) {
 const packMode = process.env.T3CODE_PACK_EXE;
 const packBootstrap = packMode === "1" || packMode === "bootstrap";
 const packExecutable = packBootstrap || packMode === "bundle";
-const seaWebRtcPolyfill = (id: string) => packExecutable && id === "node-datachannel/polyfill";
+const seaWebRtcModule = (id: string) =>
+  packExecutable && (id === "node-datachannel/polyfill" || id === "node-datachannel");
+const seaWebRtcBridge = NodePath.join(import.meta.dirname, "scripts/sea-webrtc.mjs");
 const cliAssetDir = process.env.T3CODE_CLI_ASSET_DIR ?? "";
 if (packExecutable && !cliAssetDir) throw new Error("Build the executable with build:exe.");
 // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
@@ -138,19 +140,17 @@ export default mergeConfig(
         "jsonc-parser": "jsonc-parser/lib/esm/main.js",
         ...(packExecutable
           ? {
-              "node-datachannel/polyfill": NodePath.join(
-                import.meta.dirname,
-                "scripts/sea-webrtc-polyfill.mjs",
-              ),
+              "node-datachannel/polyfill": seaWebRtcBridge,
+              "node-datachannel": seaWebRtcBridge,
             }
           : {}),
       },
       deps: {
         // alwaysBundle=false has no opinion; neverBundle must retain transitive native acceleration.
-        alwaysBundle: (id: string) => seaWebRtcPolyfill(id) || shouldBundleCliDependency(id),
+        alwaysBundle: (id: string) => seaWebRtcModule(id) || shouldBundleCliDependency(id),
         neverBundle: (id: string) =>
           (packBootstrap && id === "./binMain.ts") ||
-          (!seaWebRtcPolyfill(id) && isExternalCliDependency(id)),
+          (!seaWebRtcModule(id) && isExternalCliDependency(id)),
         onlyBundle: false,
       },
       banner: {
