@@ -49,11 +49,12 @@ jobs:
           docker build --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE:$GITHUB_SHA" infra/web
       - name: Verify the packaged client
+        shell: bash
         run: |
           id=$(docker run -d -p 127.0.0.1::8080 "$IMAGE:$GITHUB_SHA")
           trap 'docker logs "$id"; docker rm -f "$id"' EXIT
           url="http://$(docker port "$id" 8080/tcp)"
-          curl -fsS --retry 12 --retry-connrefused --retry-delay 1 "$url/" -o "$RUNNER_TEMP/index.html"
+          curl -fsS --retry 12 --retry-all-errors --retry-delay 1 "$url/" -o "$RUNNER_TEMP/index.html"
           cmp apps/web/dist/index.html "$RUNNER_TEMP/index.html"
           curl -fsS "$url/settings/connections" | cmp - "$RUNNER_TEMP/index.html"
           entry=$(jq -er '."index.html".file' apps/web/dist/.vite/manifest.json)
