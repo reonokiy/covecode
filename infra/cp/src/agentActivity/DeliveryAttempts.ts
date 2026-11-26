@@ -67,7 +67,8 @@ export class DeliveryAttempts extends Context.Service<
   }
 >()("cove-cp/agentActivity/DeliveryAttempts") {}
 
-const SOURCE_JOB_CLAIM_LEASE_MINUTES = 10;
+// Expire after a worker's 60 s delivery deadline, before its 90 s queue lease can be reclaimed.
+const SOURCE_JOB_CLAIM_LEASE_MS = 75_000;
 export const DELIVERY_ATTEMPT_RETENTION_DAYS = 1;
 export const DELIVERY_ATTEMPT_PRUNE_BATCH_SIZE = 5_000;
 // Caps each cron run so draining the pre-retention backlog cannot monopolize the database.
@@ -106,8 +107,7 @@ const make = Effect.gen(function* () {
     return Option.match(DateTime.make(claimedAt), {
       onNone: () => true,
       onSome: (dateTime) =>
-        now.epochMilliseconds - dateTime.epochMilliseconds >=
-        SOURCE_JOB_CLAIM_LEASE_MINUTES * 60 * 1_000,
+        now.epochMilliseconds - dateTime.epochMilliseconds >= SOURCE_JOB_CLAIM_LEASE_MS,
     });
   };
 

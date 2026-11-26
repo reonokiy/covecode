@@ -10,6 +10,10 @@ import {
   type RelayLibp2pNode,
   type RelayRegisteredEndpoint,
 } from "@covecode/libp2p-tunnel";
+import { makeReplicaDirectory, type ReplicaRoute } from "./ReplicaDirectory.ts";
+import { RelayDb } from "../db.ts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Schedule from "effect/Schedule";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
@@ -66,6 +70,7 @@ export function verifyTunnelConnectorToken(
 }
 
 export interface Libp2pTunnelRegistryService {
+  readonly routes?: (keys: readonly string[]) => Effect.Effect<readonly ReplicaRoute[]>;
   readonly enabled: boolean;
   readonly peerId: string | null;
   readonly getMultiaddrs: () => ReadonlyArray<string>;
@@ -125,6 +130,22 @@ export function advertisedRelayMultiaddrs(
   });
 }
 
+export function routeForEndpoint(matching: readonly ReplicaRoute[]) {
+  const registration = matching[0]?.registration;
+  if (!registration) return undefined;
+  return {
+    libp2pPeerId: registration.peerId,
+    libp2pDirectMultiaddrs: registration.directMultiaddrs,
+    libp2pRelayMultiaddrs: [
+      ...new Set(
+        matching
+          .filter((r) => r.registration.peerId === registration.peerId)
+          .flatMap((r) => r.addresses),
+      ),
+    ],
+  };
+}
+
 export const layerDisabled: Layer.Layer<Libp2pTunnelRegistry> = Layer.succeed(
   Libp2pTunnelRegistry,
   Libp2pTunnelRegistry.of(makeDisabledService()),
@@ -145,12 +166,46 @@ export const layerLive = Layer.effect(
     const namespace = config.managedEndpointNamespace ?? DEFAULT_MANAGED_ENDPOINT_NAMESPACE;
     const tunnelSecret = Redacted.value(config.libp2p.tunnelSecret);
 
+    const db = yield* RelayDb;
+    const directory = config.libp2p.replicaMultiaddrs
+      ? makeReplicaDirectory(
+          db,
+          yield* (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie),
+        )
+      : undefined;
     const node: RelayLibp2pNode = yield* Effect.acquireRelease(
       Effect.promise(() =>
         createRelayLibp2pNode({
+          ...(config.libp2p.replicaMultiaddrs
+            ? { replicaMultiaddrs: config.libp2p.replicaMultiaddrs }
+            : {}),
           listenMultiaddrs: config.libp2p.listenMultiaddrs,
           announceMultiaddrs: config.libp2p.announceMultiaddrs,
+          ...(config.libp2p.connectionLimits !== undefined
+            ? { connectionLimits: config.libp2p.connectionLimits }
+            : {}),
           ...(config.libp2p.keyPath !== undefined ? { keyPath: config.libp2p.keyPath } : {}),
+          ...(directory
+            ? {
+                onEndpointReady: (entry: RelayRegisteredEndpoint) =>
+                  runPromise(directory.record(entry.endpointKey, entry)),
+                onEndpointDisconnected: (key: string) => {
+                  void runPromise(
+                    directory.record(key, null).pipe(Effect.catchCause(Effect.logWarning)),
+                  );
+                },
+                remoteRoutes: async (key: string) => {
+                  const routes = await runPromise(directory.routes([key]));
+                  const peerId = routes[0]?.registration.peerId;
+                  return routes
+                    .filter((route) => route.registration.peerId === peerId)
+                    .map((route) => ({
+                      peerId: route.registration.peerId,
+                      addresses: route.addresses.filter((a) => !a.endsWith(`/p2p/${node.peerId}`)),
+                    }));
+                },
+              }
+            : {}),
           validateRegistration: async ({ endpointId, endpointKey, connectorToken }) =>
             runPromise(
               Effect.gen(function* () {
@@ -160,13 +215,12 @@ export const layerLive = Layer.effect(
                 if (
                   allocation === null ||
                   allocation.tunnelReleasedAt !== null ||
-                  allocation.tunnelId === null ||
-                  allocation.environmentId !== endpointId
+                  allocation.tunnelId !== endpointId
                 ) {
                   return false;
                 }
                 const activeLinks = yield* links.findActiveManagedForEnvironment({
-                  environmentId: endpointId,
+                  environmentId: allocation.environmentId,
                   userId: allocation.userId,
                 });
                 if (activeLinks.length === 0) {
@@ -175,16 +229,16 @@ export const layerLive = Layer.effect(
                 return verifyTunnelConnectorToken(tunnelSecret, {
                   endpointKey,
                   tunnelId: allocation.tunnelId,
-                  environmentId: endpointId,
+                  environmentId: allocation.environmentId,
                   connectorToken,
                 });
               }).pipe(
-                Effect.catch((error) =>
+                Effect.tapError((error) =>
                   Effect.logWarning("Failed to validate libp2p tunnel registration", {
                     endpointId,
                     endpointKey,
                     error,
-                  }).pipe(Effect.as(false)),
+                  }),
                 ),
               ),
             ),
@@ -193,7 +247,23 @@ export const layerLive = Layer.effect(
       (relayNode) => Effect.promise(() => relayNode.stop()).pipe(Effect.ignore),
     );
 
+    if (directory) {
+      yield* Effect.acquireRelease(
+        directory.start(node.peerId, node.getMultiaddrs()).pipe(Effect.orDie),
+        () => directory.stop.pipe(Effect.ignore),
+      );
+      yield* directory
+        .heartbeat()
+        .pipe(
+          Effect.catchCause(Effect.logWarning),
+          Effect.repeat(Schedule.spaced("10 seconds")),
+          Effect.forkScoped,
+        );
+    }
     return Libp2pTunnelRegistry.of({
+      ...(directory
+        ? { routes: (keys: readonly string[]) => directory.routes(keys).pipe(Effect.orDie) }
+        : {}),
       enabled: true,
       peerId: node.peerId,
       getMultiaddrs: () => node.getMultiaddrs(),

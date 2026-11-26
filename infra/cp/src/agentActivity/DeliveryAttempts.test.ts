@@ -125,7 +125,7 @@ describe("DeliveryAttempts", () => {
             limit: () =>
               Effect.succeed([
                 {
-                  createdAt: "1969-12-31T23:00:00.000Z",
+                  createdAt: "1969-12-31T23:58:30.000Z",
                   apnsStatus: null,
                   apnsReason: null,
                   apnsId: null,

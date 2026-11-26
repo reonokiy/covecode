@@ -1,3 +1,4 @@
+import type { RelayLibp2pNodeOptions } from "@covecode/libp2p-tunnel";
 import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -31,8 +32,10 @@ export interface OidcProviderConfiguration {
 export interface Libp2pGatewayConfiguration {
   readonly enabled: boolean;
   readonly listenMultiaddrs: ReadonlyArray<string>;
+  readonly replicaMultiaddrs?: ReadonlyArray<string>;
   readonly announceMultiaddrs: ReadonlyArray<string>;
   readonly keyPath?: string;
+  readonly connectionLimits?: NonNullable<RelayLibp2pNodeOptions["connectionLimits"]>;
   readonly tunnelSecret: Redacted.Redacted<string>;
   readonly internalGatewayBaseUrl?: string;
 }

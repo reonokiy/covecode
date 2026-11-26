@@ -54,32 +54,33 @@ export const applyPostgresMigrations = Effect.fn("relay.db.apply_postgres_migrat
     return { applied: [] as string[] };
   }
 
-  yield* db.$client.unsafe(
-    "CREATE TABLE IF NOT EXISTS relay_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
-  );
+  return yield* db.$client.withTransaction(
+    Effect.gen(function* () {
+      yield* db.$client.unsafe("SELECT pg_advisory_xact_lock(hashtext('cove-cp/migrations'))");
+      yield* db.$client.unsafe(
+        "CREATE TABLE IF NOT EXISTS relay_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+      );
 
-  const existingRows = yield* db.$client.unsafe<{ readonly name: string }>(
-    "SELECT name FROM relay_migrations",
-  );
-  const appliedSet = new Set(existingRows.map((row) => row.name));
+      const existingRows = yield* db.$client.unsafe<{ readonly name: string }>(
+        "SELECT name FROM relay_migrations",
+      );
+      const appliedSet = new Set(existingRows.map((row) => row.name));
 
-  const entries = yield* fs.readDirectory(migrationsDir);
-  const sorted = [...entries].toSorted();
-  const newlyApplied: string[] = [];
+      const entries = yield* fs.readDirectory(migrationsDir);
+      const sorted = [...entries].toSorted();
+      const newlyApplied: string[] = [];
 
-  for (const folder of sorted) {
-    if (appliedSet.has(folder)) continue;
-    const sqlPath = path.join(migrationsDir, folder, "migration.sql");
-    if (!(yield* fs.exists(sqlPath))) continue;
+      for (const folder of sorted) {
+        if (appliedSet.has(folder)) continue;
+        const sqlPath = path.join(migrationsDir, folder, "migration.sql");
+        if (!(yield* fs.exists(sqlPath))) continue;
 
-    const sqlText = yield* fs.readFileString(sqlPath);
-    const statements = sqlText
-      .split("--> statement-breakpoint")
-      .map((statement) => statement.trim())
-      .filter((statement) => statement.length > 0);
+        const sqlText = yield* fs.readFileString(sqlPath);
+        const statements = sqlText
+          .split("--> statement-breakpoint")
+          .map((statement) => statement.trim())
+          .filter((statement) => statement.length > 0);
 
-    yield* db.$client.withTransaction(
-      Effect.gen(function* () {
         for (const statement of statements) {
           yield* db.$client.unsafe(statement);
         }
@@ -87,10 +88,10 @@ export const applyPostgresMigrations = Effect.fn("relay.db.apply_postgres_migrat
           "INSERT INTO relay_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING",
           [folder],
         );
-      }),
-    );
-    newlyApplied.push(folder);
-  }
+        newlyApplied.push(folder);
+      }
 
-  return { applied: newlyApplied };
+      return { applied: newlyApplied };
+    }),
+  );
 });

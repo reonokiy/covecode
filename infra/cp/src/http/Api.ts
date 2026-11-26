@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -440,7 +441,7 @@ export const layerMetadataApi = HttpApiBuilder.group(
       )
       .handle("controlPlaneConfig", () => {
         const relayMultiaddrs = Libp2pTunnelRegistry.advertisedRelayMultiaddrs(
-          settings.libp2p?.announceMultiaddrs ?? [],
+          settings.libp2p?.replicaMultiaddrs ?? settings.libp2p?.announceMultiaddrs ?? [],
           tunnelRegistry,
         );
         return Effect.succeed({
@@ -455,7 +456,7 @@ export const layerMetadataApi = HttpApiBuilder.group(
             : null,
           libp2p: {
             enabled: Boolean(settings.libp2p?.enabled),
-            peerId: tunnelRegistry?.peerId ?? null,
+            peerId: settings.libp2p?.replicaMultiaddrs ? null : (tunnelRegistry?.peerId ?? null),
             relayMultiaddrs,
           },
         });
@@ -837,20 +838,36 @@ export const layerClientApi = HttpApiBuilder.group(
             config.libp2p?.announceMultiaddrs ?? [],
             tunnelRegistry,
           );
+          const keys = environments.map((env) => {
+            if (env.endpoint.providerKind !== "libp2p_tunnel") return null;
+            try {
+              const parsed = new URL(env.endpoint.httpBaseUrl);
+              return (
+                extractEndpointKeyFromPath(parsed.pathname) ??
+                extractEndpointKeyFromSubdomainHost(parsed.host, config.managedEndpointBaseDomain)
+              );
+            } catch {
+              return null;
+            }
+          });
+          const routeRows = tunnelRegistry.routes
+            ? yield* tunnelRegistry.routes(keys.filter((key): key is string => key !== null))
+            : undefined;
+          const routes = routeRows && Arr.groupBy(routeRows, (row) => row.registration.endpointKey);
           return {
-            environments: environments.map((env) => {
+            environments: environments.map((env, index) => {
               if (env.endpoint.providerKind !== "libp2p_tunnel") return env;
-              let key: string | null = null;
-              try {
-                const parsed = new URL(env.endpoint.httpBaseUrl);
-                key =
-                  extractEndpointKeyFromPath(parsed.pathname) ??
-                  extractEndpointKeyFromSubdomainHost(
-                    parsed.host,
-                    config.managedEndpointBaseDomain,
-                  );
-              } catch {
-                key = null;
+              const key = keys[index];
+              if (routes && key) {
+                return {
+                  ...env,
+                  endpoint: {
+                    ...env.endpoint,
+                    transportMode: "p2p" as const,
+                    libp2pRelayMultiaddrs: [],
+                    ...Libp2pTunnelRegistry.routeForEndpoint(routes[key] ?? []),
+                  },
+                };
               }
               const registration = key ? tunnelRegistry.getEndpointRegistration(key) : null;
               if (!registration && relayMultiaddrs.length === 0) return env;

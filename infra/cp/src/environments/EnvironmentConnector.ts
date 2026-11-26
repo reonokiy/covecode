@@ -415,12 +415,16 @@ const make = Effect.gen(function* () {
     if (!key) return endpoint.httpBaseUrl;
     return `${normalizeRelayIssuer(internalBaseUrl)}/t/${key}/`;
   };
-  const enrichEndpointWithLibp2p = (
+  const enrichEndpointWithLibp2p = Effect.fn("cp.enrich_endpoint")(function* (
     endpoint: RelayManagedEndpoint,
     allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null,
-  ): RelayManagedEndpoint => {
+  ) {
     if (endpoint.providerKind !== "libp2p_tunnel" || !allocation) return endpoint;
     const key = endpointKeyFromTunnelName(namespace, allocation.tunnelName);
+    if (key && tunnelRegistry?.routes) {
+      const route = Libp2pTunnelRegistry.routeForEndpoint(yield* tunnelRegistry.routes([key]));
+      return { ...endpoint, transportMode: "p2p" as const, libp2pRelayMultiaddrs: [], ...route };
+    }
     const registration = key && tunnelRegistry ? tunnelRegistry.getEndpointRegistration(key) : null;
     const announceAddrs = Libp2pTunnelRegistry.advertisedRelayMultiaddrs(
       settings.libp2p?.announceMultiaddrs ?? [],
@@ -437,7 +441,7 @@ const make = Effect.gen(function* () {
       ...(announceAddrs.length > 0 ? { libp2pRelayMultiaddrs: announceAddrs } : {}),
       ...(settings.libp2p?.enabled ? { transportMode: "p2p" as const } : {}),
     };
-  };
+  });
   const resolveManagedEndpoint = Effect.fn("relay.environment_connector.resolve_managed_endpoint")(
     function* (input: {
       readonly operation: "connect" | "status";
@@ -755,7 +759,7 @@ const make = Effect.gen(function* () {
       }
       return {
         environmentId: link.environmentId,
-        endpoint: enrichEndpointWithLibp2p(endpoint, allocation),
+        endpoint: yield* enrichEndpointWithLibp2p(endpoint, allocation),
         credential: decoded.credential,
         expiresAt: decoded.expiresAt,
       };

@@ -1,16 +1,19 @@
 import * as NodeNet from "node:net";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
-import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
+import {
+  circuitRelayTransport,
+  type CircuitRelayTransportComponents,
+} from "@libp2p/circuit-relay-v2";
 import { dcutr } from "@libp2p/dcutr";
 import { identify, identifyPush } from "@libp2p/identify";
-import type { Connection, Libp2p, PeerId, PrivateKey } from "@libp2p/interface";
+import type { Connection, Listener, PrivateKey } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
 import { webRTC } from "@libp2p/webrtc";
 import { BROWSER_TUNNEL_PROTOCOL } from "./browserProtocol.ts";
 import { serveBrowserStream } from "./browserBridge.ts";
 import { webSockets } from "@libp2p/websockets";
-import { multiaddr } from "@multiformats/multiaddr";
+import { multiaddr, type Multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 
 import {
@@ -27,6 +30,7 @@ export type EnvironmentTunnelState = "connecting" | "connected" | "reconnecting"
 
 export interface EnvironmentTunnelStatusEvent {
   readonly state: EnvironmentTunnelState;
+  readonly readyConnections?: number;
   readonly peerId: string;
   readonly circuitMultiaddrs: readonly string[];
   readonly error?: string;
@@ -56,6 +60,7 @@ export interface EnvironmentLibp2pTunnel {
 }
 
 interface RegisterResponsePayload {
+  readonly confirmReservation?: boolean;
   readonly ok?: unknown;
   readonly error?: unknown;
 }
@@ -79,41 +84,65 @@ export async function createEnvironmentLibp2pTunnel(
     throw new Error("At least one relay multiaddr is required to start the libp2p tunnel");
   }
 
+  const groups = new Map<string, string[]>();
+  for (const raw of options.relayMultiaddrs) {
+    // Legacy addresses without a peer ID are alternative transports for one relay.
+    const key = /\/p2p\/([^/]+)\/?$/u.exec(raw)?.[1] ?? "";
+    const group = groups.get(key) ?? [];
+    group.push(raw);
+    groups.set(key, group);
+  }
+
   const enableP2p = options.enableP2p !== false;
   const privateKey = options.privateKey ?? (await loadOrCreateLibp2pPrivateKey(options.keyPath));
 
-  const node: Libp2p = await createLibp2p({
+  const node = await createLibp2p({
     privateKey,
     addresses: {
-      listen: [...(enableP2p ? ["/ip4/0.0.0.0/tcp/0", "/webrtc"] : []), "/p2p-circuit"],
+      listen: enableP2p ? ["/ip4/0.0.0.0/tcp/0", "/webrtc"] : [],
     },
     transports: [
       webSockets(),
       ...(enableP2p ? [webRTC()] : []),
       tcp(),
-      circuitRelayTransport({
-        reservationCompletionTimeout: 10_000,
-        discoveryFilter: {
-          has: () => false,
-          add: () => {},
-          remove: () => {},
-        },
-      }),
+      circuitRelayTransport({ reservationCompletionTimeout: 10_000 }),
     ],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
     services: {
       identify: identify(),
       identifyPush: identifyPush(),
+      relayReservation: ({
+        transportManager,
+      }: Pick<CircuitRelayTransportComponents, "transportManager">) => {
+        const listeners = new Map<string, Listener>();
+        let pending = Promise.resolve();
+        async function open(peer: string, address: Multiaddr) {
+          const listener = listeners.get(peer);
+          if (listener) return listener.listen(address);
+          const existing = new Set(transportManager.getListeners());
+          const opening = transportManager.listen([address]);
+          // libp2p installs the listener synchronously before awaiting its reservation.
+          const added = transportManager.getListeners().find((entry) => !existing.has(entry));
+          if (added) listeners.set(peer, added);
+          await opening;
+        }
+        return {
+          listen(peer: string, address: Multiaddr) {
+            // The reservation store clears queued requests after each configured reservation.
+            const opening = pending.then(() => open(peer, address));
+            pending = opening.catch(() => {});
+            return opening;
+          },
+        };
+      },
       ...(enableP2p ? { dcutr: dcutr() } : {}),
     },
   });
 
   let stopped = false;
-  let activeRelayPeer: PeerId | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  let connectAttemptInFlight: Promise<void> | null = null;
-  let consecutiveFailures = 0;
+  const activePeers = new Set<string>();
+  const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const getCircuitMultiaddrs = (): string[] =>
     node
@@ -124,6 +153,7 @@ export async function createEnvironmentLibp2pTunnel(
   const emitStatus = (state: EnvironmentTunnelState, error?: string) => {
     options.onStatusChange?.({
       state,
+      readyConnections: activePeers.size,
       peerId: node.peerId.toString(),
       circuitMultiaddrs: getCircuitMultiaddrs(),
       ...(error !== undefined ? { error } : {}),
@@ -156,24 +186,27 @@ export async function createEnvironmentLibp2pTunnel(
     },
   );
 
-  const dialAndRegister = async (): Promise<void> => {
+  const dialAndRegister = async (addresses: readonly string[]): Promise<Connection> => {
     let lastError: unknown;
     let selectedConnection: Connection | null = null;
+    let selectedAddress: Multiaddr | undefined;
 
-    for (const rawAddr of options.relayMultiaddrs) {
-      if (stopped) return;
+    for (const rawAddr of addresses) {
+      if (stopped) throw new Error("Tunnel stopped");
       try {
-        selectedConnection = await node.dial(multiaddr(rawAddr));
+        const address = multiaddr(rawAddr);
+        selectedConnection = await node.dial(address);
+        selectedAddress = address;
         break;
       } catch (error) {
         lastError = error;
       }
     }
 
-    if (!selectedConnection) {
+    if (!selectedConnection || !selectedAddress) {
       throw lastError instanceof Error
         ? lastError
-        : new Error(`Failed to dial any relay multiaddr (${options.relayMultiaddrs.join(", ")})`);
+        : new Error(`Failed to dial any relay multiaddr (${addresses.join(", ")})`);
     }
 
     const regStream = await selectedConnection.newStream(COVE_TUNNEL_REGISTER_PROTOCOL, {
@@ -200,53 +233,94 @@ export async function createEnvironmentLibp2pTunnel(
       );
     }
 
-    activeRelayPeer = selectedConnection.remotePeer;
-    consecutiveFailures = 0;
-    emitStatus("connected");
+    const relayAddress = selectedAddress
+      .toString()
+      .endsWith(`/p2p/${selectedConnection.remotePeer}`)
+      ? selectedAddress
+      : selectedAddress.encapsulate(`/p2p/${selectedConnection.remotePeer}`);
+    const peer = selectedConnection.remotePeer.toString();
+    await node.services.relayReservation.listen(peer, relayAddress.encapsulate("/p2p-circuit"));
+    if (ack.confirmReservation) {
+      const ready = await selectedConnection.newStream(COVE_TUNNEL_REGISTER_PROTOCOL);
+      await writeJsonLine(ready, { ready: true, endpointKey: options.endpointKey });
+      const result = await readBoundedJsonLine<RegisterResponsePayload>(ready);
+      if (!result.ok) throw new Error("Relay reservation no longer active");
+    }
+    if (stopped) throw new Error("Tunnel stopped");
+    if (selectedConnection.status !== "open")
+      throw new Error("Relay disconnected during registration");
+    return selectedConnection;
   };
 
-  const scheduleReconnect = () => {
-    if (stopped || reconnectTimer !== undefined || connectAttemptInFlight !== null) {
-      return;
+  let started = false;
+  const initialFailures: Array<() => void> = [];
+  const rejected = new Set<readonly string[]>();
+  function maintainRelay(addresses: readonly string[]) {
+    let connection: Connection | undefined;
+    let failures = 0;
+    let pending = false;
+    function schedule(error?: string) {
+      if (stopped || pending) return;
+      pending = true;
+      if (activePeers.size === 0) emitStatus("reconnecting", error);
+      const delay = Math.min(
+        options.reconnectMaxDelayMs ?? 30_000,
+        (options.reconnectBaseDelayMs ?? 500) * 2 ** failures++,
+      );
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        pending = false;
+        void connect().catch(() => {});
+      }, delay);
+      timers.add(timer);
     }
-    const baseDelay = options.reconnectBaseDelayMs ?? 500;
-    const maxDelay = options.reconnectMaxDelayMs ?? 30_000;
-    const delay = Math.min(maxDelay, baseDelay * Math.pow(2, consecutiveFailures));
-    consecutiveFailures += 1;
-    emitStatus("reconnecting");
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = undefined;
-      if (stopped) return;
-      connectAttemptInFlight = dialAndRegister()
-        .catch((error) => {
-          if (error instanceof TunnelRegistrationUnauthorizedError) {
-            emitStatus("stopped", error.message);
-            return;
-          }
-          emitStatus("reconnecting", error instanceof Error ? error.message : String(error));
-          scheduleReconnect();
-        })
-        .finally(() => {
-          connectAttemptInFlight = null;
-        });
-    }, delay);
+    async function connect() {
+      try {
+        connection = await dialAndRegister(addresses);
+        activePeers.add(connection.id);
+        emitStatus("connected");
+        failures = 0;
+      } catch (error) {
+        if (!(error instanceof TunnelRegistrationUnauthorizedError)) {
+          const reason = error instanceof Error ? error.message : String(error);
+          if (started) schedule(reason);
+          else initialFailures.push(() => schedule(reason));
+        } else {
+          rejected.add(addresses);
+          if (!stopped && rejected.size === groups.size) emitStatus("stopped", error.message);
+        }
+        throw error;
+      }
+    }
+    node.addEventListener("connection:close", ({ detail }) => {
+      if (detail.id !== connection?.id) return;
+      activePeers.delete(detail.id);
+      connection = undefined;
+      if (!stopped && activePeers.size > 0) emitStatus("connected");
+      schedule();
+    });
+    return connect();
+  }
+  const stop = async () => {
+    stopped = true;
+    for (const timer of timers) clearTimeout(timer);
+    timers.clear();
+    activePeers.clear();
+    await node.stop();
   };
-
-  node.addEventListener("peer:disconnect", (evt) => {
-    if (stopped || activeRelayPeer === null) return;
-    if (!evt.detail.equals(activeRelayPeer)) return;
-    const stillOpen = node.getConnections(activeRelayPeer).some((conn) => conn.status === "open");
-    if (!stillOpen) {
-      activeRelayPeer = null;
-      scheduleReconnect();
-    }
-  });
-
   emitStatus("connecting");
   try {
-    await dialAndRegister();
+    await Promise.any(Array.from(groups.values(), maintainRelay));
+    started = true;
+    for (const retry of initialFailures.splice(0)) retry();
   } catch (error) {
-    await Promise.resolve(node.stop()).catch(() => {});
+    await stop();
+    if (error instanceof AggregateError) {
+      throw (
+        error.errors.find((cause) => !(cause instanceof TunnelRegistrationUnauthorizedError)) ??
+        error.errors[0]
+      );
+    }
     throw error;
   }
 
@@ -279,19 +353,11 @@ export async function createEnvironmentLibp2pTunnel(
   return {
     peerId: node.peerId.toString(),
     getCircuitMultiaddrs,
-    isConnected: () =>
-      activeRelayPeer !== null &&
-      node.getConnections(activeRelayPeer).some((conn) => conn.status === "open"),
+    isConnected: () => activePeers.size > 0,
     waitForRelayReservation,
     stop: async () => {
-      stopped = true;
-      if (reconnectTimer !== undefined) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      activeRelayPeer = null;
+      await stop();
       emitStatus("stopped");
-      await node.stop();
     },
   };
 }

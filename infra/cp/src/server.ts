@@ -9,7 +9,7 @@ import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { RelayApi } from "@t3tools/contracts/relay";
 import { normalizeRelayIssuer } from "@t3tools/shared/relayJwt";
-import * as Clock from "effect/Clock";
+
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -18,7 +18,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Queue from "effect/Queue";
+import * as PushJobs from "./agentActivity/PushJobs.ts";
 import * as Redacted from "effect/Redacted";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
@@ -44,7 +44,7 @@ import * as FcmDeliveries from "./agentActivity/FcmDeliveries.ts";
 import * as FcmDeliveryQueueSender from "./agentActivity/FcmDeliveryQueueSender.ts";
 import * as LiveActivities from "./agentActivity/LiveActivities.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
-import type { SignedApnsDeliveryJob } from "./agentActivity/apnsDeliveryJobs.ts";
+
 import * as CloudMintSigner from "./auth/CloudMintSigner.ts";
 import * as DpopProofs from "./auth/DpopProofs.ts";
 import * as OidcAuth from "./auth/OidcAuth.ts";
@@ -99,9 +99,13 @@ export interface ControlPlaneServerOptions {
   readonly libp2p?: {
     readonly enabled?: boolean;
     readonly listenMultiaddrs?: ReadonlyArray<string>;
+    readonly replicaMultiaddrs?: ReadonlyArray<string>;
     readonly announceMultiaddrs?: ReadonlyArray<string>;
     readonly keyPath?: string;
     readonly tunnelSecret?: string;
+    readonly connectionLimits?: NonNullable<
+      RelayConfiguration.Libp2pGatewayConfiguration["connectionLimits"]
+    >;
   };
 }
 
@@ -115,23 +119,22 @@ export interface ControlPlaneServerHandle {
   readonly stop: () => Promise<void>;
 }
 
-const makeInMemoryHookRateLimiter = () => {
-  const buckets = new Map<string, Array<number>>();
+const makeHookRateLimiter = (db: RelayDb.RelayDb["Service"]) => {
   const check = (prefix: string, limit: number, periodSeconds: number) =>
-    Effect.fnUntraced(function* (key: string) {
-      const nowMs = yield* Clock.currentTimeMillis;
-      const cutoff = nowMs - periodSeconds * 1_000;
-      const mapKey = `${prefix}:${key}`;
-      const existing = (buckets.get(mapKey) ?? []).filter((timestamp) => timestamp > cutoff);
-      if (existing.length >= limit) {
-        buckets.set(mapKey, existing);
-        return false;
-      }
-      existing.push(nowMs);
-      buckets.set(mapKey, existing);
-      return true;
+    Effect.fn("cp.hook.check_limit")(function* (key: string) {
+      const rows = yield* db.$client
+        .unsafe(
+          `INSERT INTO cove_hook_windows AS w VALUES ($1, ARRAY[statement_timestamp()], statement_timestamp()+$3 * interval '1 second')
+         ON CONFLICT (bucket) DO UPDATE SET hits=ARRAY(
+           SELECT t FROM unnest(w.hits) t WHERE t > statement_timestamp()-$3 * interval '1 second'
+         ) || excluded.hits, expires_at=excluded.expires_at
+         WHERE cardinality(w.hits)<$2 OR w.hits[1] <= statement_timestamp()-$3 * interval '1 second'
+         RETURNING bucket`,
+          [prefix + ":" + key, limit, periodSeconds],
+        )
+        .pipe(Effect.orDie);
+      return rows.length > 0;
     });
-
   return HookForwarder.HookRateLimiter.of({
     allowHook: check(
       "hook",
@@ -335,6 +338,18 @@ export async function startControlPlaneServer(
     throw new Error("cove-cp requires either databaseUrl or relayDbLayer");
   }
 
+  if (
+    options.libp2p?.replicaMultiaddrs &&
+    (!options.publicUrl ||
+      !options.cloudMintPrivateKey ||
+      !options.cloudMintPublicKey ||
+      !options.libp2p.tunnelSecret ||
+      (options.apns && !options.apnsDeliveryJobSigningSecret))
+  ) {
+    throw new Error(
+      "Replicas require a common public URL, mint key pair, tunnel secret and, for APNs, shared job signing secret",
+    );
+  }
   const host = options.host ?? "0.0.0.0";
   const requestedPort = options.port ?? 8787;
   const httpServer = NodeHttp.createServer();
@@ -345,12 +360,12 @@ export async function startControlPlaneServer(
     ? normalizeRelayIssuer(options.publicUrl)
     : `http://${connectHost}:${actualPort}`;
   const internalGateway = NodeHttp.createServer();
+  const scope = await Effect.runPromise(Scope.make());
 
   try {
     const internalPort = await listenHttpServer(internalGateway, "127.0.0.1", 0);
     const internalGatewayBaseUrl = `http://127.0.0.1:${internalPort}`;
     const bootEffect = Effect.gen(function* () {
-      const scope = yield* Scope.make();
       const memoMap = yield* Layer.makeMemoMap;
       const secrets = yield* loadOrGenerateSecrets(options);
 
@@ -360,6 +375,9 @@ export async function startControlPlaneServer(
         oidc: options.oidc,
         libp2p: {
           enabled: libp2pEnabled,
+          ...(options.libp2p?.replicaMultiaddrs
+            ? { replicaMultiaddrs: options.libp2p.replicaMultiaddrs }
+            : {}),
           listenMultiaddrs: options.libp2p?.listenMultiaddrs ?? [
             "/ip4/0.0.0.0/tcp/4001",
             "/ip4/0.0.0.0/tcp/4002/ws",
@@ -367,6 +385,9 @@ export async function startControlPlaneServer(
           announceMultiaddrs: options.libp2p?.announceMultiaddrs ?? [],
           ...(secrets.libp2pKeyPath !== undefined ? { keyPath: secrets.libp2pKeyPath } : {}),
           tunnelSecret: Redacted.make(secrets.tunnelSecret),
+          ...(options.libp2p?.connectionLimits !== undefined
+            ? { connectionLimits: options.libp2p.connectionLimits }
+            : {}),
           internalGatewayBaseUrl,
         },
         apns: options.apns ?? null,
@@ -383,9 +404,6 @@ export async function startControlPlaneServer(
           : {}),
         ...(options.t3Chat !== undefined ? { t3Chat: options.t3Chat } : {}),
       };
-
-      const apnsQueue = yield* Queue.bounded<SignedApnsDeliveryJob>(256);
-      const fcmQueue = yield* Queue.bounded<FcmDeliveries.FcmDeliveryJob>(256);
 
       const platformLayer = Layer.mergeAll(
         NodeServices.layer,
@@ -464,19 +482,24 @@ export async function startControlPlaneServer(
         Layer.provideMerge(Layer.mergeAll(baseLayer, fcmAssertionSignerLayer)),
       );
 
+      const dbContext = yield* Layer.buildWithMemoMap(dbLayer, memoMap, scope);
+      const db = Context.get(dbContext, RelayDb.RelayDb);
       const apnsQueueLayer = (
-        config.apns !== null
+        config.apns
           ? ApnsDeliveryQueue.layerInProcess((job) =>
-              Queue.offer(apnsQueue, job).pipe(Effect.asVoid),
+              PushJobs.enqueue("apns", job.payload.target.deviceId, job).pipe(
+                Effect.provideService(RelayDb.RelayDb, db),
+              ),
             )
           : ApnsDeliveryQueue.layerNoop
       ).pipe(Layer.provideMerge(baseLayer));
-      const fcmSenderLayer =
-        config.fcmServiceAccount !== undefined
-          ? FcmDeliveryQueueSender.layerInProcess((job) =>
-              Queue.offer(fcmQueue, job).pipe(Effect.asVoid),
-            )
-          : FcmDeliveryQueueSender.layerNoop;
+      const fcmSenderLayer = config.fcmServiceAccount
+        ? FcmDeliveryQueueSender.layerInProcess((job) =>
+            PushJobs.enqueue("fcm", job.deviceId, job).pipe(
+              Effect.provideService(RelayDb.RelayDb, db),
+            ),
+          )
+        : FcmDeliveryQueueSender.layerNoop;
 
       const apnsDeliveriesLayer = ApnsDeliveries.layer.pipe(
         Layer.provideMerge(
@@ -528,9 +551,9 @@ export async function startControlPlaneServer(
 
       const hookRateLimiterLayer = Layer.succeed(
         HookForwarder.HookRateLimiter,
-        makeInMemoryHookRateLimiter(),
+        makeHookRateLimiter(db),
       );
-      const hookInboxLayer = HookInbox.layerInProcess.pipe(Layer.provideMerge(baseLayer));
+      const hookInboxLayer = HookInbox.layerPostgres.pipe(Layer.provideMerge(baseLayer));
       const heldHooksLayer = HeldHooks.layer.pipe(
         Layer.provideMerge(Layer.mergeAll(baseLayer, linksLayer, allocationsLayer, hookInboxLayer)),
       );
@@ -598,41 +621,45 @@ export async function startControlPlaneServer(
       const sharedContext = yield* Layer.buildWithMemoMap(sharedServicesLayer, memoMap, scope);
       const tunnelRegistry = Context.get(sharedContext, Libp2pTunnelRegistry.Libp2pTunnelRegistry);
 
+      const heldHooks = Context.get(sharedContext, HeldHooks.HeldHooks);
+      yield* HookInbox.deliverOne((key) =>
+        heldHooks
+          .resolveEndpoint(key)
+          .pipe(
+            Effect.map((endpoint) => (endpoint?.holdWhileOffline ? endpoint.httpBaseUrl : null)),
+          ),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Webhook inbox unavailable", { cause }).pipe(Effect.as(false)),
+        ),
+        Effect.flatMap((worked) => (worked ? Effect.void : Effect.sleep("1 second"))),
+        Effect.forever,
+        Effect.provideContext(sharedContext),
+        Effect.forkIn(scope),
+      );
       if (config.apns !== null) {
         const apnsDeliveries = Context.get(sharedContext, ApnsDeliveries.ApnsDeliveries);
-        yield* Effect.forever(
-          Queue.take(apnsQueue).pipe(
-            Effect.flatMap((job) =>
-              apnsDeliveries
-                .processSignedJob(job)
-                .pipe(
-                  Effect.catch((error) =>
-                    Effect.logWarning("In-process APNs delivery job failed", { error }),
-                  ),
-                ),
-            ),
-          ),
-        ).pipe(Effect.provideContext(sharedContext), Effect.forkIn(scope));
+        yield* PushJobs.worker("apns", apnsDeliveries.processSignedJob).pipe(
+          Effect.provideContext(sharedContext),
+          Effect.forkIn(scope),
+        );
       }
-
-      if (config.fcmServiceAccount !== undefined) {
-        const fcmDeliveries = Context.get(sharedContext, FcmDeliveries.FcmDeliveries);
-        yield* Effect.forever(
-          Queue.take(fcmQueue).pipe(
-            Effect.flatMap((job) =>
-              fcmDeliveries
-                .process(job)
-                .pipe(
-                  Effect.catch((error) =>
-                    Effect.logWarning("In-process FCM delivery job failed", { error }),
-                  ),
-                ),
-            ),
-          ),
-        ).pipe(Effect.provideContext(sharedContext), Effect.forkIn(scope));
+      if (config.fcmServiceAccount) {
+        const fcm = Context.get(sharedContext, FcmDeliveries.FcmDeliveries);
+        yield* PushJobs.worker("fcm", fcm.process).pipe(
+          Effect.provideContext(sharedContext),
+          Effect.forkIn(scope),
+        );
       }
 
       const cleanupStep = Effect.gen(function* () {
+        const claimed = yield* db.$client.unsafe(
+          `INSERT INTO cove_maintenance AS m VALUES ('cleanup', now()+$1 * interval '1 millisecond')
+           ON CONFLICT (task) DO UPDATE SET next_run=excluded.next_run WHERE m.next_run<=now() RETURNING task`,
+          [Duration.toMillis(CLEANUP_INTERVAL)],
+        );
+        if (!claimed.length) return;
+        yield* db.$client.unsafe("DELETE FROM cove_held_hooks WHERE expires_at<=now()");
         const now = yield* DateTime.now;
         const terminalCutoff = DateTime.formatIso(
           DateTime.subtract(now, { days: TERMINAL_ACTIVITY_RETENTION_DAYS }),
@@ -642,6 +669,9 @@ export async function startControlPlaneServer(
         const attempts = Context.get(sharedContext, DeliveryAttempts.DeliveryAttempts);
         const publisher = Context.get(sharedContext, AgentActivityPublisher.AgentActivityPublisher);
 
+        yield* db.$client
+          .unsafe("DELETE FROM cove_hook_windows WHERE expires_at<now()")
+          .pipe(Effect.catchCause(Effect.logWarning));
         yield* dpop.pruneExpired.pipe(
           Effect.catch((error) => Effect.logWarning("Failed to prune DPoP proofs", { error })),
         );
@@ -665,16 +695,20 @@ export async function startControlPlaneServer(
       });
 
       yield* Effect.sleep(CLEANUP_INTERVAL).pipe(
-        Effect.andThen(cleanupStep.pipe(Effect.repeat(Schedule.spaced(CLEANUP_INTERVAL)))),
+        Effect.andThen(
+          cleanupStep.pipe(
+            Effect.catchCause(Effect.logWarning),
+            Effect.repeat(Schedule.spaced(CLEANUP_INTERVAL)),
+          ),
+        ),
         Effect.asVoid,
         Effect.forkIn(scope),
       );
 
-      return { scope, memoMap, sharedContext, tunnelRegistry, config };
+      return { memoMap, sharedContext, tunnelRegistry, config };
     }).pipe(Effect.provide(NodeServices.layer));
 
-    const { scope, memoMap, sharedContext, tunnelRegistry, config } =
-      await Effect.runPromise(bootEffect);
+    const { memoMap, sharedContext, tunnelRegistry, config } = await Effect.runPromise(bootEffect);
 
     const sharedContextLayer = Layer.succeedContext(sharedContext);
     const authLayers = Layer.mergeAll(
@@ -777,11 +811,15 @@ export async function startControlPlaneServer(
       if (match) {
         const path = (req.url ?? "").slice(match.stripPathPrefix?.length ?? 0);
         if (req.method === "GET" && path === "/.well-known/cove-tunnel") {
-          if (tunnelRegistry.isEndpointConnected(match.endpointKey)) res.writeHead(200).end();
-          else
-            res
-              .writeHead(503, { "content-type": "application/json" })
-              .end('{"error":"tunnel_unavailable"}');
+          const online = tunnelRegistry.routes
+            ? Effect.runPromise(tunnelRegistry.routes([match.endpointKey])).then(
+                (rows) => rows.length > 0,
+              )
+            : Promise.resolve(tunnelRegistry.isEndpointConnected(match.endpointKey));
+          void online.then(
+            (ready) => res.writeHead(ready ? 200 : 503).end(),
+            () => res.writeHead(503).end(),
+          );
         } else {
           res.writeHead(404, { "content-type": "application/json" }).end('{"error":"not_found"}');
         }
@@ -822,6 +860,7 @@ export async function startControlPlaneServer(
     };
   } catch (error) {
     await Promise.allSettled([closeHttpServer(httpServer), closeHttpServer(internalGateway)]);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
     throw error;
   }
 }

@@ -1,12 +1,12 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as HttpClient from "effect/http/HttpClient";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { HOOK_INBOX_MAX_BYTES, HOOK_INBOX_MAX_PER_HOOK, type HeldHook } from "./HookInboxStore.ts";
-import { sendUpstream } from "./upstream.ts";
+import { RelayDb } from "../db.ts";
+import { ENVIRONMENT_UNREACHABLE_STATUSES, sendUpstream } from "./upstream.ts";
 
 const HOOK_INBOX_MAX_REQUESTS = 1_000;
 
@@ -48,87 +48,113 @@ export const layerNoop: Layer.Layer<HookInbox> = Layer.succeed(
   }),
 );
 
-interface EndpointInboxBucket {
-  baseUrl: string;
-  items: Array<HeldHook>;
-  totalBytes: number;
-  draining: boolean;
-}
+const encodeRequest = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-export const layerInProcess: Layer.Layer<HookInbox, never, HttpClient.HttpClient> = Layer.effect(
+export const layerPostgres = Layer.effect(
   HookInbox,
   Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
-    const buckets = new Map<string, EndpointInboxBucket>();
-
-    const drainBucket = Effect.fn("relay.hook_inbox.drain_bucket")(function* (endpointKey: string) {
-      const bucket = buckets.get(endpointKey);
-      if (!bucket || bucket.draining) return;
-      bucket.draining = true;
-      try {
-        while (bucket.items.length > 0) {
-          const next = bucket.items[0];
-          if (!next) break;
-          const sent = yield* sendUpstream(bucket.baseUrl, next).pipe(
-            Effect.provideService(HttpClient.HttpClient, httpClient),
-            Effect.map((response) => Option.isSome(response)),
-            Effect.orElseSucceed(() => false),
-          );
-          if (!sent) {
-            break;
-          }
-          bucket.items.shift();
-          bucket.totalBytes = Math.max(0, bucket.totalBytes - next.body.byteLength);
-        }
-        if (bucket.items.length === 0) {
-          buckets.delete(endpointKey);
-        }
-      } finally {
-        bucket.draining = false;
-      }
-    });
-
+    const sql = (yield* RelayDb).$client;
     return HookInbox.of({
-      hold: Effect.fn("relay.hook_inbox.hold")((input) =>
-        Effect.sync(() => {
-          let bucket = buckets.get(input.endpointKey);
-          if (!bucket) {
-            bucket = { baseUrl: input.baseUrl, items: [], totalBytes: 0, draining: false };
-            buckets.set(input.endpointKey, bucket);
-          }
-          bucket.baseUrl = input.baseUrl;
-          if (bucket.items.some((item) => item.id === input.hook.id)) {
-            return false;
-          }
-          const perHookCount = bucket.items.filter(
-            (item) => item.hookKey === input.hook.hookKey,
-          ).length;
-          if (
-            bucket.items.length >= HOOK_INBOX_MAX_REQUESTS ||
-            perHookCount >= HOOK_INBOX_MAX_PER_HOOK ||
-            bucket.totalBytes + input.hook.body.byteLength > HOOK_INBOX_MAX_BYTES
-          ) {
-            return false;
-          }
-          bucket.items.push(input.hook);
-          bucket.totalBytes += input.hook.body.byteLength;
-          return true;
-        }),
-      ),
-      wake: Effect.fn("relay.hook_inbox.wake")(function* (input) {
-        const bucket = buckets.get(input.endpointKey);
-        if (!bucket || bucket.items.length === 0) {
-          return false;
-        }
-        bucket.baseUrl = input.baseUrl;
-        yield* Effect.forkDetach(drainBucket(input.endpointKey));
-        return true;
+      hold: Effect.fn("relay.hook_inbox.hold")(function* ({ endpointKey, hook }) {
+        const { body, ...request } = hook;
+        return yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              // Serialize admission so simultaneous requests cannot exceed the per-environment limits.
+              yield* sql.unsafe("SELECT pg_advisory_xact_lock(42,hashtext($1))", [endpointKey]);
+              const rows = yield* sql.unsafe(
+                `
+          INSERT INTO cove_held_hooks(endpoint_key,hook_key,delivery_id,request,body)
+          SELECT $1,$2,$3,$4::jsonb,$5::bytea FROM cove_held_hooks
+          WHERE endpoint_key=$1 AND expires_at>now()
+          HAVING count(*)<$6 AND count(*) FILTER (WHERE hook_key=$2)<$7
+            AND coalesce(sum(octet_length(body)),0)+octet_length($5::bytea)<=$8
+          ON CONFLICT (delivery_id) DO NOTHING RETURNING seq`,
+                [
+                  endpointKey,
+                  hook.hookKey,
+                  hook.id,
+                  encodeRequest(request),
+                  body,
+                  HOOK_INBOX_MAX_REQUESTS,
+                  HOOK_INBOX_MAX_PER_HOOK,
+                  HOOK_INBOX_MAX_BYTES,
+                ],
+              );
+              return rows.length > 0;
+            }),
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) => new HookInboxError({ operation: "hold", endpointKey, cause }),
+            ),
+          );
       }),
-      clear: Effect.fn("relay.hook_inbox.clear")((input) =>
-        Effect.sync(() => {
-          buckets.delete(input.endpointKey);
-        }),
+      wake: Effect.fn("relay.hook_inbox.wake")(function* ({ endpointKey }) {
+        const rows = yield* sql
+          .unsafe(
+            "UPDATE cove_held_hooks SET available_at=now() WHERE endpoint_key=$1 AND expires_at>now() RETURNING seq",
+            [endpointKey],
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) => new HookInboxError({ operation: "wake", endpointKey, cause }),
+            ),
+          );
+        return rows.length > 0;
+      }),
+      clear: Effect.fn("relay.hook_inbox.clear")(({ endpointKey }) =>
+        sql.unsafe("DELETE FROM cove_held_hooks WHERE endpoint_key=$1", [endpointKey]).pipe(
+          Effect.asVoid,
+          Effect.mapError(
+            (cause) => new HookInboxError({ operation: "clear", endpointKey, cause }),
+          ),
+        ),
       ),
     });
   }),
 );
+
+export const deliverOne = Effect.fn("relay.hook_inbox.deliver_one")(function* <E>(
+  resolveTarget: (endpointKey: string) => Effect.Effect<string | null, E>,
+) {
+  const sql = (yield* RelayDb).$client;
+  const [row] = yield* sql.unsafe<{
+    seq: string;
+    endpoint_key: string;
+    attempt: number;
+    request: Omit<HeldHook, "body">;
+    body: Uint8Array;
+  }>(`UPDATE cove_held_hooks SET lease_until=now()+interval '30 seconds',attempt=attempt+1
+    WHERE seq=(SELECT j.seq FROM cove_held_hooks j
+      WHERE j.available_at<=now() AND j.expires_at>now() AND (j.lease_until IS NULL OR j.lease_until<=now())
+        AND NOT EXISTS (SELECT 1 FROM cove_held_hooks older WHERE older.endpoint_key=j.endpoint_key
+          AND older.hook_key=j.hook_key AND older.seq<j.seq AND older.expires_at>now())
+      ORDER BY j.available_at,j.seq LIMIT 1 FOR UPDATE SKIP LOCKED)
+    RETURNING seq,endpoint_key,attempt,request,body`);
+  if (!row) return false;
+  const target = yield* resolveTarget(row.endpoint_key);
+  let finished = target === null;
+  if (target !== null) {
+    const result = yield* sendUpstream(target, { ...row.request, body: row.body }).pipe(
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    finished =
+      Option.isSome(result) &&
+      !ENVIRONMENT_UNREACHABLE_STATUSES.has(result.value.status) &&
+      result.value.status !== 429;
+  }
+  if (finished) {
+    yield* sql.unsafe("DELETE FROM cove_held_hooks WHERE seq=$1 AND attempt=$2", [
+      row.seq,
+      row.attempt,
+    ]);
+  } else {
+    yield* sql.unsafe(
+      `UPDATE cove_held_hooks SET lease_until=NULL, available_at=now()+interval '30 seconds'
+      WHERE seq=$1 AND attempt=$2`,
+      [row.seq, row.attempt],
+    );
+  }
+  return true;
+});

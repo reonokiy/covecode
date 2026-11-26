@@ -424,7 +424,7 @@ export const make = Effect.fn("CloudManagedEndpointRuntime.make")(function* (fac
 
     const onStatusChange = (event: EnvironmentTunnelStatusEvent) => {
       if (stopped) return;
-      readyConnections = event.state === "connected" ? 1 : 0;
+      readyConnections = event.readyConnections ?? (event.state === "connected" ? 1 : 0);
       peerId = event.peerId;
       Queue.offerUnsafe(statusLogQueue, event);
       if (!attached) {

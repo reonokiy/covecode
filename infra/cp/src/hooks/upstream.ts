@@ -18,6 +18,14 @@ const RELAY_HOOK_UPSTREAM_TIMEOUT_MS = 8_000;
 // Cloudflare answers 530 when the tunnel for a hostname has no connected origin.
 export const TUNNEL_OFFLINE_STATUS = 530;
 
+/** No tunnel origin (530) or local server unavailable (502/503/504) means the environment did not take the request. */
+export const ENVIRONMENT_UNREACHABLE_STATUSES: ReadonlySet<number> = new Set([
+  502,
+  503,
+  504,
+  TUNNEL_OFFLINE_STATUS,
+]);
+
 export interface UpstreamHook {
   readonly id: string;
   readonly receivedAt: string;

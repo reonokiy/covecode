@@ -238,10 +238,8 @@ const make = Effect.gen(function* () {
         environmentId: input.environmentId,
       },
     );
-    const relayMultiaddrs =
-      settings.libp2p.announceMultiaddrs.length > 0
-        ? [...settings.libp2p.announceMultiaddrs]
-        : undefined;
+    const advertised = settings.libp2p.replicaMultiaddrs ?? settings.libp2p.announceMultiaddrs;
+    const relayMultiaddrs = advertised.length ? [...advertised] : undefined;
 
     return {
       endpoint: {

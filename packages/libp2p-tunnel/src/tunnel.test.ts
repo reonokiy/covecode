@@ -1,5 +1,13 @@
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
+import { noise } from "@chainsafe/libp2p-noise";
+import { yamux } from "@chainsafe/libp2p-yamux";
+import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
+import { generateKeyPair } from "@libp2p/crypto/keys";
+import { identify } from "@libp2p/identify";
+import { webSockets } from "@libp2p/websockets";
+import { multiaddr } from "@multiformats/multiaddr";
+import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { WebSocket, WebSocketServer } from "ws";
 
@@ -173,6 +181,73 @@ describe("libp2p-tunnel", () => {
     expect(relay.isEndpointConnected("unauth-key")).toBe(false);
   });
 
+  it("reserves both replicas and keeps serving when one stops", async () => {
+    const origin = await startOriginFixture();
+    cleanups.push(origin.close);
+    const firstReady = Promise.withResolvers<void>();
+    const secondReady = Promise.withResolvers<void>();
+    const first = await createRelayLibp2pNode({
+      validateRegistration: () => true,
+      onEndpointReady: () => firstReady.resolve(),
+    });
+    const second = await createRelayLibp2pNode({
+      validateRegistration: () => true,
+      onEndpointReady: () => secondReady.resolve(),
+    });
+    cleanups.push(first.stop, second.stop);
+    const tunnel = await createEnvironmentLibp2pTunnel({
+      relayMultiaddrs: [...first.getMultiaddrs(), ...second.getMultiaddrs()],
+      endpointId: "env-ha",
+      endpointKey: "ha",
+      connectorToken: "token",
+      localHost: "127.0.0.1",
+      localPort: origin.port,
+      enableP2p: false,
+    });
+    cleanups.push(tunnel.stop);
+    await Promise.all([firstReady.promise, secondReady.promise]);
+    await first.stop();
+    expect(tunnel.isConnected()).toBe(true);
+    const proxy = await createClientLibp2pProxy({
+      relayMultiaddrs: second.getMultiaddrs(),
+      targetPeerId: tunnel.peerId,
+      mode: "relay",
+    });
+    cleanups.push(proxy.stop);
+    expect((await fetch(new URL("healthz", proxy.httpBaseUrl + "/"))).status).toBe(200);
+  });
+
+  it("re-registers and restores its reservation when a control plane restarts", async () => {
+    const privateKey = await generateKeyPair("Ed25519");
+    const relayOptions = { privateKey, validateRegistration: () => true };
+    let relay = await createRelayLibp2pNode(relayOptions);
+    cleanups.push(() => relay.stop());
+    const relayAddress = relay.getMultiaddrs()[0]!;
+    const restored = Promise.withResolvers<readonly string[]>();
+    let waitingForReconnect = false;
+    const tunnel = await createEnvironmentLibp2pTunnel({
+      relayMultiaddrs: [relayAddress],
+      endpointId: "env-reconnect",
+      endpointKey: "reconnect-key",
+      connectorToken: "token",
+      localHost: "127.0.0.1",
+      localPort: 39999,
+      enableP2p: false,
+      onStatusChange: ({ state, circuitMultiaddrs }) => {
+        if (waitingForReconnect && state === "connected") restored.resolve(circuitMultiaddrs);
+      },
+    });
+    cleanups.push(tunnel.stop);
+    waitingForReconnect = true;
+    await relay.stop();
+    relay = await createRelayLibp2pNode({
+      ...relayOptions,
+      listenMultiaddrs: [relayAddress.replace(/\/p2p\/[^/]+$/u, "")],
+    });
+    expect(await restored.promise).toEqual([expect.stringContaining("/p2p-circuit/")]);
+    expect(relay.getEndpointRegistration("reconnect-key")?.peerId).toBe(tunnel.peerId);
+  });
+
   it("proxies HTTP requests, headers, POST bodies, and WebSockets with path prefix stripping", async () => {
     const origin = await startOriginFixture();
     cleanups.push(() => origin.close());
@@ -325,6 +400,7 @@ describe("libp2p-tunnel", () => {
 
     const relay = await createRelayLibp2pNode({
       listenMultiaddrs: ["/ip4/127.0.0.1/tcp/0/ws", "/ip4/127.0.0.1/tcp/0"],
+      connectionLimits: { durationMs: 120_000, bytes: 1_048_576 },
       validateRegistration: () => true,
     });
     cleanups.push(() => relay.stop());
@@ -341,7 +417,20 @@ describe("libp2p-tunnel", () => {
     cleanups.push(() => tunnel.stop());
 
     const circuitAddrs = await tunnel.waitForRelayReservation(10_000);
-    expect(circuitAddrs.some((addr) => addr.includes("/p2p-circuit"))).toBe(true);
+    const circuit = circuitAddrs.find(
+      (addr) => addr.includes("/ws/p2p/") && addr.endsWith(`/p2p-circuit/p2p/${tunnel.peerId}`),
+    );
+    expect(circuit).toBeDefined();
+    const client = await createLibp2p({
+      transports: [webSockets(), circuitRelayTransport()],
+      connectionEncrypters: [noise()],
+      streamMuxers: [yamux()],
+      services: { identify: identify() },
+    });
+    cleanups.push(async () => client.stop());
+    const connection = await client.dial(multiaddr(circuit!));
+    expect(connection.limits?.bytes).toBeGreaterThan(0n);
+    expect(connection.limits?.bytes).toBeLessThanOrEqual(1_048_576n);
 
     const relayProxy = await createClientLibp2pProxy({
       relayMultiaddrs: relay.getMultiaddrs(),

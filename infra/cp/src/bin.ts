@@ -93,7 +93,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (optionalEnv(env["COVE_CP_AUTO_MIGRATE"]) !== "false") {
+  const migrateOnly = process.argv.slice(2).includes("--migrate-only");
+  if (migrateOnly || optionalEnv(env["COVE_CP_AUTO_MIGRATE"]) !== "false") {
     const migrateEffect = Effect.gen(function* () {
       const path = yield* Path.Path;
       const migrationsDir = yield* path.fromFileUrl(
@@ -109,6 +110,7 @@ async function main(): Promise<void> {
       ),
     );
     await Effect.runPromise(migrateEffect);
+    if (migrateOnly) return;
   }
 
   const host = optionalEnv(env["HOST"]) ?? "0.0.0.0";
@@ -131,6 +133,8 @@ async function main(): Promise<void> {
   ]);
   const announceMultiaddrs = parseCommaList(env["COVE_CP_LIBP2P_ANNOUNCE"], []);
   const libp2pKeyPath = optionalEnv(env["COVE_CP_LIBP2P_KEY_PATH"]);
+  const relayDurationMs = optionalEnv(env["COVE_CP_LIBP2P_RELAY_DURATION_MS"]);
+  const relayBytes = optionalEnv(env["COVE_CP_LIBP2P_RELAY_BYTES"]);
   const tunnelSecret = optionalEnv(env["COVE_CP_TUNNEL_SECRET"]);
 
   const cloudMintPrivateKey = optionalEnv(env["COVE_CP_SIGNING_PRIVATE_KEY"]);
@@ -159,8 +163,15 @@ async function main(): Promise<void> {
     ...(defaultMaxManagedTunnels !== undefined ? { defaultMaxManagedTunnels } : {}),
     libp2p: {
       enabled: libp2pEnabled,
+      ...(optionalEnv(env["COVE_CP_LIBP2P_REPLICAS"])
+        ? { replicaMultiaddrs: parseCommaList(env["COVE_CP_LIBP2P_REPLICAS"], []) }
+        : {}),
       listenMultiaddrs,
       announceMultiaddrs,
+      connectionLimits: {
+        ...(relayDurationMs !== undefined ? { durationMs: Number(relayDurationMs) } : {}),
+        ...(relayBytes !== undefined ? { bytes: Number(relayBytes) } : {}),
+      },
       ...(libp2pKeyPath !== undefined ? { keyPath: libp2pKeyPath } : {}),
       ...(tunnelSecret !== undefined ? { tunnelSecret } : {}),
     },
