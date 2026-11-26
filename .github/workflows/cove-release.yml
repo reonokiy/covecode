@@ -128,6 +128,7 @@ jobs:
       resource_key: ${{ matrix.resource }}
       verify_runner: ${{ matrix.verify || '' }}
       cli_archive: ${{ matrix.resource != 'darwin-x64' }}
+      launch_check: ${{ matrix.platform == 'mac' }}
       version: ${{ needs.bundle.outputs.version }}
       ref: ${{ github.sha }}
       release_channel: ${{ needs.bundle.outputs.channel }}
