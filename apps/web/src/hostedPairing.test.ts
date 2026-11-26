@@ -3,12 +3,24 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   buildHostedPairingUrl,
   hasHostedPairingRequest,
+  isHostedStaticApp,
   readHostedPairingRequest,
 } from "./hostedPairing";
 
 describe("hostedPairing", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the deployment origin for a standalone web build and its pairing links", () => {
+    const location = new URL("https://cove.example.org:8443/settings/connections");
+    vi.stubGlobal("window", { location });
+    vi.stubEnv("VITE_HOSTED_APP_URL", "/");
+
+    expect(isHostedStaticApp()).toBe(true);
+    const link = buildHostedPairingUrl({ host: "https://environment.example.org", token: "test" });
+    expect(new URL(link).origin).toBe(location.origin);
   });
 
   it("reads hosted pairing host and query token parameters", () => {

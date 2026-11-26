@@ -11,7 +11,11 @@ export interface HostedPairingRequest {
 export type HostedAppChannel = "latest" | "nightly";
 
 export function configuredHostedAppUrl(): string {
-  return import.meta.env.VITE_HOSTED_APP_URL?.trim() || DEFAULT_HOSTED_APP_URL;
+  const configured = import.meta.env.VITE_HOSTED_APP_URL?.trim();
+  if (configured === "/") {
+    return globalThis.window?.location?.origin ?? DEFAULT_HOSTED_APP_URL;
+  }
+  return configured || DEFAULT_HOSTED_APP_URL;
 }
 
 function configuredBackendUrl(): string {

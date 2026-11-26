@@ -16,7 +16,15 @@ It works with Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kir
 
 ## Releases
 
-[Download Cove Code](https://github.com/reonokiy/covecode/releases) for desktop, the standalone CLI, or the web client. The matching Linux x64 control panel image is published as `ghcr.io/reonokiy/cove-cp:vX.Y.Z`.
+[Download Cove Code](https://github.com/reonokiy/covecode/releases) for desktop, the standalone CLI, or the web client. Each release also publishes Linux x64 images for the web client (`ghcr.io/reonokiy/cove-web:vX.Y.Z`) and the control panel (`ghcr.io/reonokiy/cove-cp:vX.Y.Z`).
+
+To serve the web client locally, replace `vX.Y.Z` with the release tag in this command.
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 ghcr.io/reonokiy/cove-web:vX.Y.Z
+```
+
+Open `http://localhost:8080` and select your control panel at sign-in. For remote browsers, serve the container behind an HTTPS reverse proxy so the browser can use the tunnel service worker.
 
 Cove CI checks pushes and pull requests to `covecode`. To publish a stable release, push a new `vX.Y.Z` tag on a commit from that branch. GitHub Actions builds the platform archives, assembles the updater manifests and checksums, and publishes them in this repository.
 

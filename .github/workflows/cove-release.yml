@@ -42,12 +42,6 @@ jobs:
             apps/server/dist
             apps/desktop/dist-electron
           if-no-files-found: error
-      - run: tar -czf "cove-web-${GITHUB_REF_NAME#v}.tar.gz" -C apps/server/dist/client .
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: web
-          path: cove-web-*.tar.gz
-          if-no-files-found: error
 
   desktop:
     needs: bundle
@@ -141,8 +135,17 @@ jobs:
     with:
       publish: true
 
+  web:
+    needs: [bundle, desktop]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/deploy-cove-web.yml
+    with:
+      version: ${{ needs.bundle.outputs.version }}
+
   publish:
-    needs: control_panel
+    needs: [control_panel, web]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

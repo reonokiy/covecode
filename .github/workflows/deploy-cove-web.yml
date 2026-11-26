@@ -1,0 +1,77 @@
+name: Cove web image
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+  push:
+    branches: [covecode]
+    paths:
+      - ".github/workflows/deploy-cove-web.yml"
+      - "infra/web/**"
+      - "apps/web/src/hostedPairing.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    if: github.repository == 'reonokiy/covecode'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/reonokiy/cove-web
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: ./.github/actions/setup-ci-deps
+      - name: Build standalone web client
+        working-directory: apps/web
+        env:
+          APP_VERSION: ${{ inputs.version }}
+          VITE_HOSTED_APP_URL: /
+          T3CODE_WEB_SOURCEMAP: "false"
+        run: vp build
+      - name: Package web client and build image
+        run: |
+          node scripts/apply-web-brand-assets.ts production
+          tar -czf "infra/web/cove-web-${VERSION:-$GITHUB_SHA}.tar.gz" -C apps/web/dist .
+          docker build --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE:$GITHUB_SHA" infra/web
+      - name: Verify the packaged client
+        run: |
+          id=$(docker run -d -p 127.0.0.1::8080 "$IMAGE:$GITHUB_SHA")
+          trap 'docker logs "$id"; docker rm -f "$id"' EXIT
+          url="http://$(docker port "$id" 8080/tcp)"
+          curl -fsS --retry 12 --retry-connrefused --retry-delay 1 "$url/" -o "$RUNNER_TEMP/index.html"
+          cmp apps/web/dist/index.html "$RUNNER_TEMP/index.html"
+          curl -fsS "$url/settings/connections" | cmp - "$RUNNER_TEMP/index.html"
+          entry=$(jq -er '."index.html".file' apps/web/dist/.vite/manifest.json)
+          curl -fsS "$url/$entry" | cmp - "apps/web/dist/$entry"
+          curl -fsS "$url/cove-tunnel-sw.js" | cmp - apps/web/dist/cove-tunnel-sw.js
+          curl -fsS "$url/.well-known/apple-app-site-association" | jq -e '.applinks.details | length > 0'
+          [[ "$(curl -sS -o /dev/null -w '%{http_code}' "$url/assets/missing.js")" == 404 ]]
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: inputs.version != '' && github.ref_type == 'tag'
+        with:
+          name: web
+          path: infra/web/cove-web-*.tar.gz
+          if-no-files-found: error
+      - name: Publish versioned image
+        if: inputs.version != '' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:$GITHUB_REF_NAME"
+          docker push "$IMAGE:$GITHUB_REF_NAME"
