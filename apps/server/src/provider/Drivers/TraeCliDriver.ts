@@ -1,8 +1,6 @@
 import {
   CodexSettings,
   ProviderDriverKind,
-  ProviderSessionId,
-  ThreadId,
   TextGenerationError,
   TraeCliSettings,
   type ServerProviderModel,
@@ -10,6 +8,7 @@ import {
 import type { ProviderDriver, ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -20,13 +19,20 @@ import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIden
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
+  haveProviderSnapshotSettingsChanged,
+  makeProviderSnapshotSettingsSource,
+} from "@t3tools/provider-core/server/snapshotSettings";
+import {
   buildServerProvider,
+  isWindowsCommandNotFound,
+  providerProbeEnvironment,
   isCommandMissingCause,
   resolveProviderProbeTimeoutMs,
   type ProviderProbeResult,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as DateTime from "effect/DateTime";
 import * as Digest from "effect/crypto/Digest";
@@ -35,7 +41,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import {
   makeCodexAdapterV2,
@@ -61,7 +67,7 @@ const decodeAdapterSettings = Schema.decodeEffect(CodexSettings);
 const unsupportedTextGeneration: ProviderTextGeneration = (() => {
   const unsupported = (operation: string) =>
     Effect.fail(
-      new TextGenerationError({ operation, detail: "TRAE CLI text generation is not supported." }),
+      new TextGenerationError({ operation, detail: "TRAE text generation is not supported." }),
     );
   return {
     generateCommitMessage: () => unsupported("generateCommitMessage"),
@@ -87,7 +93,7 @@ export type TraeCliDriverEnv =
 
 export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = {
   driverKind: DRIVER,
-  metadata: { displayName: "TRAE CLI", supportsMultipleInstances: true },
+  metadata: { displayName: "TRAE", supportsMultipleInstances: true },
   configSchema: TraeCliSettings,
   defaultConfig: () => decodeSettings({}),
   create: Effect.fn("TraeCliDriver.create")(function* (input) {
@@ -126,13 +132,26 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
       accentColor: input.accentColor,
       continuationGroupKey: continuationIdentity.continuationKey,
     });
+    const args = traeCliAppServerArgs(config.launchArgs);
+    const connect = Effect.fn("TraeCliDriver.connect")(function* (
+      child: ChildProcessSpawner.ChildProcessHandle,
+      logger?: CodexClient.CodexAppServerClientOptions["logger"],
+    ) {
+      const context = yield* Layer.build(
+        CodexClient.layerChildProcess(child, {
+          normalizeIncomingPayload: normalizeTraeCliPayload,
+          ...(logger ? { logIncoming: true, logOutgoing: true, logger } : {}),
+        }),
+      );
+      return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(Effect.provide(context));
+    });
     const openClient: CodexAppServerClientFactoryShape["open"] = Effect.fn("TraeCliDriver.open")(
       function* (openInput) {
         const command = yield* makeCodexAppServerSpawnCommand({
           driver: DRIVER,
           command: config.binaryPath,
-          args: traeCliAppServerArgs(config.launchArgs),
-          env: environment,
+          args,
+          env: openInput.environment,
           cwd: openInput.runtimePolicy.cwd ?? host.paths.cwd,
           threadId: openInput.threadId,
         });
@@ -145,15 +164,7 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
           nativeEventLogger: loggers.native,
           providerSessionId: openInput.providerSessionId,
         });
-        const context = yield* Layer.build(
-          CodexClient.layerChildProcess(child, {
-            normalizeIncomingPayload: normalizeTraeCliPayload,
-            ...(logger ? { logIncoming: true, logOutgoing: true, logger } : {}),
-          }),
-        );
-        return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
-          Effect.provide(context),
-        );
+        return yield* connect(child, logger);
       },
       (effect, openInput) =>
         effect.pipe(
@@ -173,7 +184,7 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
           new ProviderDriverError({
             driver: DRIVER,
             instanceId: input.instanceId,
-            detail: "Invalid TRAE CLI runtime settings.",
+            detail: "Invalid TRAE runtime settings.",
             cause,
           }),
       ),
@@ -181,11 +192,11 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
     const makeSnapshot = (probe: ProviderProbeResult, models: ReadonlyArray<ServerProviderModel>) =>
       DateTime.now.pipe(
         Effect.map((now) =>
-          stampIdentity(
-            buildServerProvider({
+          stampIdentity({
+            ...buildServerProvider({
               driver: DRIVER,
               presentation: {
-                displayName: "TRAE CLI",
+                displayName: "TRAE",
                 showInteractionModeToggle: true,
                 reportsContextWindow: true,
                 supportsConversationRollback: true,
@@ -195,29 +206,29 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
               models: traeCliModelsWithCustom(models, config),
               probe,
             }),
-          ),
+            supportsTextGeneration: false,
+          }),
         ),
       );
     const initialProbe: ProviderProbeResult = {
       installed: false,
       version: null,
-      status: "ready",
+      status: "warning",
       auth: { status: "unknown" },
     };
     const checkProvider = Effect.scoped(
       Effect.gen(function* () {
-        const client = yield* openClient({
-          instanceId: input.instanceId,
-          threadId: ThreadId.make("traecli-probe"),
-          providerSessionId: ProviderSessionId.make("traecli-probe"),
-          runtimePolicy: {
+        const env = providerProbeEnvironment(environment);
+        const launch = yield* resolveSpawnCommand(config.binaryPath, args, { env });
+        const child = yield* spawner.spawn(
+          ChildProcess.make(launch.command, launch.args, {
             cwd: host.paths.cwd,
-            runtimeMode: "approval-required",
-            interactionMode: "default",
-          },
-          settings: adapterSettings,
-          environment,
-        });
+            env,
+            shell: launch.shell,
+            forceKillAfter: "1 second",
+          }),
+        );
+        const client = yield* connect(child);
         const initialized = yield* client.request("initialize", buildCodexInitializeParams());
         yield* client.notify("initialized", undefined);
         const auth = yield* client.raw
@@ -253,27 +264,37 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
             new ProviderDriverError({
               driver: DRIVER,
               instanceId: input.instanceId,
-              detail: "Timed out while checking TRAE CLI provider status.",
+              detail: "Timed out while checking TRAE provider status.",
             }),
           ),
       }),
       Effect.catch((cause) =>
-        makeSnapshot(
-          {
-            installed: !isCommandMissingCause(cause),
-            version: null,
-            status: "error",
-            auth: { status: "unknown" },
-            message: `TRAE CLI provider check failed: ${String(cause)}`,
-          },
-          [],
-        ),
+        Effect.gen(function* () {
+          const missing =
+            isCommandMissingCause(cause) ||
+            (cause._tag === "CodexAppServerProcessExitedError" &&
+              (yield* isWindowsCommandNotFound(cause.code ?? null, cause.stderr ?? "")));
+          return yield* makeSnapshot(
+            {
+              installed: !missing,
+              version: null,
+              status: "error",
+              auth: { status: "unknown" },
+              message: missing
+                ? "TRAE executable not found. Check the binary path on this environment."
+                : cause._tag === "ProviderDriverError"
+                  ? cause.detail
+                  : "TRAE provider check failed. Check the CLI on this environment.",
+            },
+            [],
+          );
+        }),
       ),
     );
+    const snapshotSettings = yield* makeProviderSnapshotSettingsSource(config);
     const snapshot = yield* makeManagedServerProvider({
-      getSettings: Effect.succeed(config),
-      streamSettings: Stream.empty,
-      haveSettingsChanged: () => false,
+      ...snapshotSettings,
+      haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: () => makeSnapshot(initialProbe, []),
       checkProvider: config.enabled ? checkProvider : makeSnapshot(initialProbe, []),
       resolveMaintenance: () =>
@@ -290,7 +311,7 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
           new ProviderDriverError({
             driver: DRIVER,
             instanceId: input.instanceId,
-            detail: "Failed to build the TRAE CLI provider.",
+            detail: "Failed to build the TRAE provider.",
             cause,
           }),
       ),
@@ -301,6 +322,7 @@ export const TraeCliDriver: ProviderDriver<TraeCliSettings, TraeCliDriverEnv> = 
       settings: adapterSettings,
       environment,
       clientFactory: { open: openClient },
+      continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
       models: snapshot.getSnapshot.pipe(Effect.map((current) => current.models)),
       digest,
       fileSystem,

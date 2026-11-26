@@ -13,7 +13,7 @@ import * as Predicate from "effect/Predicate";
 export function normalizeTraeCliPayload(method: string, payload: unknown): unknown {
   if (!Predicate.isObject(payload) || Array.isArray(payload)) return payload;
   if (method === "remoteControl/status/changed") {
-    return { serverName: "TRAE CLI", ...payload };
+    return { serverName: "TRAE", ...payload };
   }
   const normalizeThread = (thread: unknown) =>
     Predicate.isObject(thread) && !Array.isArray(thread) ? { projectId: null, ...thread } : thread;
@@ -122,7 +122,9 @@ export function traeCliModelsWithCustom(
   models: ReadonlyArray<ServerProviderModel>,
   settings: TraeCliSettings,
 ) {
-  return providerModelsFromSettings(models, settings.customModels, null).map((model) => ({
+  const fallback =
+    models.find((model) => model.isDefault)?.capabilities ?? models[0]?.capabilities ?? null;
+  return providerModelsFromSettings(models, settings.customModels, fallback).map((model) => ({
     ...model,
     supportsTextGeneration: false,
   }));

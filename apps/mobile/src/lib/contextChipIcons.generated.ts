@@ -66,6 +66,10 @@ export const PROVIDER_CHIP_ICONS: Readonly<
     source: require("../../assets/context-chip-icons/provider-pi.png"),
     tintsIcon: true,
   },
+  traecli: {
+    source: require("../../assets/context-chip-icons/provider-traecli.png"),
+    tintsIcon: true,
+  },
   antigravity: {
     source: require("../../assets/antigravity.png"),
     tintsIcon: false,

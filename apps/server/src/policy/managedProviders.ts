@@ -2,6 +2,7 @@ import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
+  TraeCliSettings,
   defaultInstanceIdForDriver,
   disallowedProviderMessage,
   type ManagedProviderInstance,
@@ -70,6 +71,7 @@ const PIN_BYPASS_FIELDS: ReadonlyMap<
 /** Drivers this build knows, by the names users see; a policy naming any other is refused. */
 const KNOWN_DRIVERS: ReadonlyMap<ProviderDriverKind, KnownDriver> = new Map([
   known("codex", "Codex", CodexSettings),
+  known("traecli", "TRAE", TraeCliSettings),
   known("claudeAgent", "Claude", ClaudeSettings),
   known("antigravity", "Antigravity", AntigravitySettings),
   ...PACKAGED_CLIENTS.map((client) =>
@@ -193,6 +195,7 @@ const HOME_VARIABLES: ReadonlyMap<
   ProviderDriverKind,
   { readonly variable: string; readonly fields: ReadonlyArray<string> }
 > = new Map([
+  [ProviderDriverKind.make("traecli"), { variable: "TRAE_HOME", fields: ["homePath"] }],
   [ProviderDriverKind.make("claudeAgent"), { variable: "CLAUDE_CONFIG_DIR", fields: ["homePath"] }],
   [
     ProviderDriverKind.make("codex"),

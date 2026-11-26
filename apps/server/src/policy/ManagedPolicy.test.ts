@@ -274,33 +274,34 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
             : [];
         assert.isTrue(savedEnvironment.some((entry) => entry.name === "T3CODE_CODEX_LAUNCH_ARGS"));
         // A home path setting would rewrite a locked home variable at launch, so the lock owns it.
-        const claude = ProviderDriverKind.make("claudeAgent");
-        const homeLocked = yield* ManagedPolicy.fromDocument("/test/policy.json", {
-          schemaVersion: 1,
-          organization: "Example Corp",
-          limits: {
-            providers: {
-              instances: {
-                [claude]: {
-                  locked: true,
-                  environment: [{ name: "CLAUDE_CONFIG_DIR", value: "/opt/claude-home" }],
+        for (const [driver, variable] of [
+          ["claudeAgent", "CLAUDE_CONFIG_DIR"],
+          ["traecli", "TRAE_HOME"],
+        ] as const) {
+          const kind = ProviderDriverKind.make(driver);
+          const id = ProviderInstanceId.make(driver);
+          const homeLocked = yield* ManagedPolicy.fromDocument("/test/policy.json", {
+            schemaVersion: 1,
+            organization: "Example Corp",
+            limits: {
+              providers: {
+                allowedDrivers: [kind],
+                instances: {
+                  [kind]: { locked: true, environment: [{ name: variable, value: "/opt/home" }] },
                 },
               },
             },
-          },
-        });
-        const claudeId = ProviderInstanceId.make("claudeAgent");
-        const claudeConfig = homeLocked.providers.applyLimits({
-          ...DEFAULT_SERVER_SETTINGS,
-          providerInstances: {
-            [claudeId]: { driver: claude, config: { homePath: "/home/me/.other-claude" } },
-          },
-        }).providerInstances[claudeId]?.config;
-        assert.deepEqual(claudeConfig, {});
-        assert.include(
-          homeLocked.summary?.limits?.providers?.lockedInstanceFields?.[claude] ?? [],
-          "config.homePath",
-        );
+          });
+          const applied = homeLocked.providers.applyLimits({
+            ...DEFAULT_SERVER_SETTINGS,
+            providerInstances: { [id]: { driver: kind, config: { homePath: "/home/me/other" } } },
+          });
+          assert.deepEqual(applied.providerInstances[id]?.config, {});
+          assert.include(
+            homeLocked.summary?.limits?.providers?.lockedInstanceFields?.[kind] ?? [],
+            "config.homePath",
+          );
+        }
         // Codex has a second home setting, which a locked CODEX_HOME owns too.
         const codexHome = yield* ManagedPolicy.fromDocument("/test/policy.json", {
           schemaVersion: 1,

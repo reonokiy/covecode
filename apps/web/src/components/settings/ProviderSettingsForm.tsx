@@ -131,10 +131,10 @@ const PACKAGE_FIELD_TEXT: ReadonlyMap<string, string> = new Map([
   ],
   ["Custom Codex home and config directory.", msg("Custom Codex home and config directory.")],
   [
-    "Path to the TRAE CLI binary used by this instance.",
-    msg("Path to the TRAE CLI binary used by this instance."),
+    "Path to the TRAE binary used by this instance.",
+    msg("Path to the TRAE binary used by this instance."),
   ],
-  ["Custom TRAE CLI home and config directory.", msg("Custom TRAE CLI home and config directory.")],
+  ["Custom TRAE home and config directory.", msg("Custom TRAE home and config directory.")],
   [
     "Additional CLI arguments passed to traecli app-server on session start.",
     msg("Additional CLI arguments passed to traecli app-server on session start."),

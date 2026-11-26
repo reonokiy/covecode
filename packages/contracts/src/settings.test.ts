@@ -348,6 +348,9 @@ describe("provider enabled defaults", () => {
   it("resolves instance enabled state with explicit false winning", () => {
     const grok = ProviderDriverKind.make("grok");
     const codex = ProviderDriverKind.make("codex");
+    expect(resolveProviderInstanceEnabled({ driver: ProviderDriverKind.make("traecli") })).toBe(
+      false,
+    );
     expect(resolveProviderInstanceEnabled({ driver: grok, config: {} })).toBe(false);
     expect(resolveProviderInstanceEnabled({ driver: codex, config: {} })).toBe(true);
     expect(

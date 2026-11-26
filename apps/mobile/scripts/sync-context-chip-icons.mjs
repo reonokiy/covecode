@@ -1,3 +1,4 @@
+import { getProviderClient } from "@t3tools/client-runtime/provider-clients";
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
@@ -99,17 +100,12 @@ function bundledPath(viewBox) {
   if (!path) throw new Error(`Could not read the ${viewBox} logo from ProviderIcon.tsx`);
   return path;
 }
-const packageClients = await Promise.all(
-  ["cursor", "fx", "grok", "kiro", "muse", "opencode", "pi"].map(async (name) => {
-    const module = await import(
-      NodeURL.pathToFileURL(
-        NodePath.join(repositoryRoot, `packages/provider-${name}/src/client.ts`),
-      ).href
-    );
-    const client = Object.values(module).find((value) => value?.icon && value?.driverKind);
-    if (!client) throw new Error(`packages/provider-${name} exports no client with an icon`);
+const chipProviders = ["cursor", "fx", "grok", "kiro", "muse", "opencode", "pi", "traecli"].map(
+  (driver) => {
+    const client = getProviderClient(driver);
+    if (!client?.icon) throw new Error(`Missing provider icon for ${driver}`);
     return client;
-  }),
+  },
 );
 const providerSvg = (viewBox, paths) =>
   `<svg viewBox="${viewBox}" fill="none">${paths
@@ -134,7 +130,7 @@ const providerLogos = [
     accent: "#D97757",
     svg: providerSvg("0 0 256 257", [{ d: bundledPath("0 0 256 257"), fill: "#D97757" }]),
   },
-  ...packageClients.map(({ driverKind, icon }) => {
+  ...chipProviders.map(({ driverKind, icon }) => {
     const tintsIcon = icon.fill.light !== icon.fill.dark;
     return {
       driverKind,

@@ -119,7 +119,7 @@ const PROPER_NOUNS = [
   "Azure DevOps",
   "Forgejo",
   "Codex",
-  "TRAE CLI",
+  "TRAE",
   "Claude",
   "Claude Code",
   "Cursor",

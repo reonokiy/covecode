@@ -8,6 +8,8 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ServerConfig from "../../config.ts";
@@ -28,6 +30,53 @@ const dependencies = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 it.layer(dependencies)("TraeCliDriver", (it) => {
+  it.effect("checks the CLI offline and reports a missing executable", () =>
+    Effect.gen(function* () {
+      let probeEnvironment: ChildProcess.CommandOptions["env"];
+      const provider = yield* TraeCliDriver.create({
+        instanceId: ProviderInstanceId.make("traecli-work"),
+        displayName: undefined,
+        environment: [],
+        enabled: true,
+        config,
+      }).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) => {
+            if (ChildProcess.isStandardCommand(command)) probeEnvironment = command.options.env;
+            return Effect.fail(
+              PlatformError.systemError({
+                _tag: "NotFound",
+                module: "ChildProcess",
+                method: "spawn",
+              }),
+            );
+          }),
+        ),
+      );
+      const initial = yield* provider.snapshot.getSnapshot;
+      const checked = yield* provider.snapshot.refresh;
+      assert.deepEqual(
+        {
+          initial: initial.status,
+          textGeneration: checked.supportsTextGeneration,
+          installed: checked.installed,
+          status: checked.status,
+          offline: probeEnvironment?.MISE_OFFLINE,
+          home: probeEnvironment?.TRAE_HOME,
+        },
+        {
+          initial: "warning",
+          textGeneration: false,
+          installed: false,
+          status: "error",
+          offline: "1",
+          home: "/accounts/trae",
+        },
+      );
+    }),
+  );
+
   it.effect("keeps disabled instances offline and binds continuation to the TRAE home", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("traecli-work");
@@ -59,7 +108,7 @@ it.layer(dependencies)("TraeCliDriver", (it) => {
     }).pipe(
       Effect.provideService(
         ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make(() => Effect.die("Disabled TRAE CLI must not spawn a process")),
+        ChildProcessSpawner.make(() => Effect.die("Disabled TRAE must not spawn a process")),
       ),
     ),
   );

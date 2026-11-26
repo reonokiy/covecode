@@ -770,7 +770,7 @@ export const TraeCliSettings = makeProviderSettingsSchema(
     binaryPath: makeBinaryPathSetting("traecli").pipe(
       Schema.annotateKey({
         title: "Binary path",
-        description: "Path to the TRAE CLI binary used by this instance.",
+        description: "Path to the TRAE binary used by this instance.",
         providerSettingsForm: { placeholder: "traecli", clearWhenEmpty: "omit" },
       }),
     ),
@@ -778,7 +778,7 @@ export const TraeCliSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "TRAE_HOME path",
-        description: "Custom TRAE CLI home and config directory.",
+        description: "Custom TRAE home and config directory.",
         providerSettingsForm: { placeholder: "~/.trae", clearWhenEmpty: "omit" },
       }),
     ),
@@ -1657,8 +1657,8 @@ export const providerInstanceConfigEnabledFlag = (config: unknown): boolean | un
 
 // Must match each driver's enabled decoding default.
 const DEFAULT_DISABLED_PROVIDER_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set(
-  ["cursor", "grok", "fx", "kiro", "muse", "pi", "opencode", "antigravity"].map((driver) =>
-    ProviderDriverKind.make(driver),
+  ["cursor", "grok", "fx", "kiro", "muse", "pi", "opencode", "antigravity", "traecli"].map(
+    (driver) => ProviderDriverKind.make(driver),
   ),
 );
 

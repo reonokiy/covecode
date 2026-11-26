@@ -59,7 +59,7 @@ export const providerClients = makeProviderClientRegistry([
   piClient,
   {
     driverKind: ProviderDriverKind.make("traecli"),
-    label: "TRAE CLI",
+    label: "TRAE",
     icon: {
       viewBox: "0 0 24 24",
       fill: { light: "#171717", dark: "#F5F5F5" },

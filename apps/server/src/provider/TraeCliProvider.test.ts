@@ -14,7 +14,7 @@ import {
 const decodeSettings = Schema.decodeSync(TraeCliSettings);
 const customSettings = decodeSettings({ customModels: ["custom-model"] });
 
-describe("TRAE CLI native protocol", () => {
+describe("TRAE native protocol", () => {
   it("adds only missing shared-protocol metadata without changing native identity", () => {
     const thread = { id: "native-trae-thread", turns: [] };
     assert.deepEqual(normalizeTraeCliPayload("thread/start", { thread }), {
@@ -35,7 +35,7 @@ describe("TRAE CLI native protocol", () => {
         installationId: "trae",
         status: "disabled",
       }),
-      { installationId: "trae", status: "disabled", serverName: "TRAE CLI" },
+      { installationId: "trae", status: "disabled", serverName: "TRAE" },
     );
     assert.strictEqual(normalizeTraeCliPayload("turn/start", null), null);
   });
@@ -111,6 +111,7 @@ describe("TRAE CLI native protocol", () => {
         ],
       });
       const models = traeCliModelsWithCustom(page.models, customSettings);
+      assert.deepEqual(models[1]?.capabilities, model.capabilities);
       assert.deepEqual(
         models.map((entry) => entry.supportsTextGeneration),
         [false, false],
