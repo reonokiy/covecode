@@ -7,6 +7,9 @@ import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { dcutr } from "@libp2p/dcutr";
 import { identify, identifyPush } from "@libp2p/identify";
 import type { Connection, Libp2p, PrivateKey, Stream } from "@libp2p/interface";
+import { mdns } from "@libp2p/mdns";
+import * as NodeEvents from "node:events";
+import type { PeerInfo } from "@libp2p/interface";
 import { peerIdFromString } from "@libp2p/peer-id";
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
@@ -54,17 +57,35 @@ function buildCircuitTargetMultiaddr(relayAddr: string, targetPeerId: string): s
 export async function createClientLibp2pProxy(
   options: ClientLibp2pProxyOptions,
 ): Promise<ClientLibp2pProxy> {
-  if (options.relayMultiaddrs.length === 0) {
-    throw new Error("At least one relay multiaddr is required to create the libp2p client proxy");
-  }
-
+  const lan = options.relayMultiaddrs.length === 0;
   const mode: TunnelTransportMode = options.mode ?? "p2p";
   const targetPeer = peerIdFromString(options.targetPeerId);
   const privateKey = options.privateKey ?? (await loadOrCreateLibp2pPrivateKey());
 
+  const changes = new EventTarget();
+  let discovered: string[] = [];
+  const lifetime = new AbortController();
   const node: Libp2p = await createLibp2p({
     privateKey,
-    ...(mode === "p2p" ? { addresses: { listen: ["/ip4/0.0.0.0/tcp/0"] } } : {}),
+    ...(lan
+      ? {
+          connectionGater: { denyDialPeer: (peer) => !peer.equals(targetPeer) },
+          peerDiscovery: [
+            (components) => {
+              const discovery = mdns({ broadcast: false })(components);
+              discovery.addEventListener("peer", ({ detail }: CustomEvent<PeerInfo>) => {
+                if (!detail.id.equals(targetPeer)) return;
+                discovered = detail.multiaddrs.map((addr) =>
+                  addr.encapsulate(`/p2p/${targetPeer}`).toString(),
+                );
+                changes.dispatchEvent(new Event("address"));
+              });
+              return discovery;
+            },
+          ],
+        }
+      : {}),
+    ...(mode === "p2p" && !lan ? { addresses: { listen: ["/ip4/0.0.0.0/tcp/0"] } } : {}),
     transports: [
       webSockets(),
       tcp(),
@@ -77,7 +98,7 @@ export async function createClientLibp2pProxy(
     services: {
       identify: identify(),
       identifyPush: identifyPush(),
-      ...(mode === "p2p" ? { dcutr: dcutr() } : {}),
+      ...(mode === "p2p" && !lan ? { dcutr: dcutr() } : {}),
     },
   });
 
@@ -113,7 +134,7 @@ export async function createClientLibp2pProxy(
     pendingDial = (async () => {
       let lastError: unknown;
       if (mode === "p2p") {
-        const direct = (options.directMultiaddrs ?? [])
+        const direct = [...discovered, ...(options.directMultiaddrs ?? [])]
           .filter(
             (address) =>
               !address.includes("/p2p-circuit") && address.endsWith(`/p2p/${targetPeer}`),
@@ -125,6 +146,24 @@ export async function createClientLibp2pProxy(
           } catch (error) {
             lastError = error;
           }
+        }
+      }
+      if (lan) {
+        const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(12_000)]);
+        while (!signal.aborted) {
+          const previous = discovered;
+          if (previous.length) {
+            try {
+              return await node.dial(
+                previous.map((addr) => multiaddr(addr)),
+                { signal },
+              );
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          if (previous === discovered)
+            await NodeEvents.EventEmitter.once(changes, "address", { signal });
         }
       }
       for (const relayAddr of options.relayMultiaddrs) {
@@ -242,6 +281,7 @@ export async function createClientLibp2pProxy(
     },
     getActiveTransport,
     stop: async () => {
+      lifetime.abort();
       for (const socket of localSockets) socket.destroy();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());

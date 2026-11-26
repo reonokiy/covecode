@@ -12,6 +12,17 @@ describe("settings pairing URL helpers", () => {
     expect(resolveDesktopPairingUrl("http://192.168.1.44:3773", "PAIRCODE")).toBe(
       "http://192.168.1.44:3773/pair#token=PAIRCODE",
     );
+    expect(
+      resolveDesktopPairingUrl("http://192.168.1.44:3773", "PAIRCODE", {
+        peerId: "12D3KooWPeerId",
+        direct: [
+          "/ip4/192.168.1.44/tcp/4100/p2p/12D3KooWPeerId",
+          "/ip4/192.168.1.44/tcp/4101/ws/p2p/12D3KooWPeerId",
+        ],
+      }),
+    ).toBe(
+      "http://192.168.1.44:3773/pair#token=PAIRCODE&peer=12D3KooWPeerId&addr=%2Fip4%2F192.168.1.44%2Ftcp%2F4100%2Fp2p%2F12D3KooWPeerId&addr=%2Fip4%2F192.168.1.44%2Ftcp%2F4101%2Fws%2Fp2p%2F12D3KooWPeerId",
+    );
   });
 
   it("uses hosted pairing URLs for HTTPS endpoints", () => {

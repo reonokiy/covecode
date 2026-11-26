@@ -22,6 +22,20 @@ describe("remote", () => {
     });
   });
 
+  it("retains the peer pin from a native or hosted LAN pairing link", () => {
+    const peerId = "12D3KooW" + "A".repeat(44);
+    const direct = [`/ip4/192.168.1.5/tcp/1234/p2p/${peerId}`];
+    for (const base of ["http://192.168.1.5/pair", "https://app.example/pair?host=192.168.1.5"]) {
+      const url = new URL(base);
+      url.hash = new URLSearchParams({ token: "abc", peer: peerId, addr: direct[0]! }).toString();
+      expect(resolveRemotePairingTarget({ pairingUrl: url.href })).toMatchObject({
+        lanPeer: { peerId, direct },
+      });
+      url.hash = "token=abc&peer=invalid";
+      expect(() => resolveRemotePairingTarget({ pairingUrl: url.href })).toThrow();
+    }
+  });
+
   it("accepts pairing urls that still use a query token", () => {
     expect(
       resolveRemotePairingTarget({

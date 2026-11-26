@@ -12,6 +12,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
+import { LanPeerTransport } from "../relay/environmentTunnel.ts";
 import * as RpcHttp from "../rpc/http.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
@@ -283,6 +284,51 @@ describe("connection onboarding", () => {
       expect(tokenParams.get("client_device_type")).toBe("desktop");
       expect(tokenParams.get("client_os")).toBe("Test OS");
     }),
+  );
+
+  it.effect(
+    "only redeems a LAN code inside its pinned tunnel and saves the peer for reconnect",
+    () =>
+      Effect.gen(function* () {
+        const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+        const peerId = "12D3KooW" + "B".repeat(44);
+        const pairingUrl = `http://192.168.1.7/pair#token=abc&peer=${peerId}`;
+        const httpBaseUrl = "http://127.0.0.1:3045/.cove-tunnel/session/";
+        let closed = false;
+        const registration = yield* preparePairingRegistration({ pairingUrl }).pipe(
+          Effect.provide(layerPairingOnboarding(undefined, calls)),
+          Effect.provideService(LanPeerTransport, {
+            openPairing: async (peer) => {
+              expect(peer.peerId).toBe(peerId);
+              return {
+                httpBaseUrl,
+                wsBaseUrl: "ws://127.0.0.1:3045/.cove-tunnel/session/ws",
+                close: () => {
+                  closed = true;
+                },
+              };
+            },
+            prepare: () => Promise.reject(new Error("unused")),
+            release: () => {},
+          }),
+        );
+        expect(closed).toBe(true);
+        expect(calls.map((call) => call.url)).toEqual([
+          httpBaseUrl + ".well-known/t3/environment",
+          httpBaseUrl + "oauth/token",
+        ]);
+        expect(registration.profile).toMatchObject({
+          connectionId: `lan:environment-paired:${peerId}`,
+          httpBaseUrl: "http://192.168.1.7/",
+          lanPeer: { peerId, direct: [] },
+        });
+        const refused = yield* preparePairingRegistration({ pairingUrl }).pipe(
+          Effect.provide(layerPairingOnboarding(undefined, calls)),
+          Effect.flip,
+        );
+        expect(refused._tag).toBe("ConnectionBlockedError");
+        expect(calls).toHaveLength(2);
+      }),
   );
 
   it.effect("turns a switched-off environment back on when it is paired again", () =>

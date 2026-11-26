@@ -70,7 +70,9 @@ export function routeEntry(
 export function routeHttpBaseUrl(route: ConnectionRoute): string | null {
   if (route.target._tag === "PrimaryConnectionTarget") return route.target.httpBaseUrl;
   const profile = Option.getOrNull(route.profile);
-  return profile?._tag === "BearerConnectionProfile" ? profile.httpBaseUrl : null;
+  return profile?._tag === "BearerConnectionProfile" && !profile.lanPeer
+    ? profile.httpBaseUrl
+    : null;
 }
 
 function routeHostname(route: ConnectionRoute): string | null {
@@ -98,9 +100,10 @@ export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind
       return "ssh";
     case "PrimaryConnectionTarget":
     case "BearerConnectionTarget": {
+      const profile = Option.getOrNull(route.profile);
+      if (profile?._tag === "BearerConnectionProfile" && profile.lanPeer) return "lan";
       const hostname = routeHostname(route);
       if (hostname === null) return "public";
-      const profile = Option.getOrNull(route.profile);
       return directAddressKind(
         hostname,
         profile?._tag === "BearerConnectionProfile" && profile.network === "tailscale",
@@ -180,6 +183,7 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   const profile = Option.getOrNull(route.profile);
   switch (profile?._tag) {
     case "BearerConnectionProfile":
+      if (profile.lanPeer) return "lan:" + profile.lanPeer.peerId;
       return `bearer:${profile.httpBaseUrl.replace(/\/+$/, "")}`;
     case "SshConnectionProfile":
       return `ssh:${sshTargetKey(profile.target)}`;
@@ -263,6 +267,7 @@ export function mergeLearnedRoutes(input: {
     return null;
   }
   const activeProfile = Option.getOrNull(input.activeRoute.profile);
+  if (activeProfile?._tag === "BearerConnectionProfile" && activeProfile.lanPeer) return null;
   const authorization =
     active._tag === "RelayConnectionTarget" ||
     (activeProfile?._tag === "BearerConnectionProfile" &&
@@ -420,6 +425,7 @@ function withNetwork(route: ConnectionRoute, tailscale: boolean): ConnectionRout
         label: profile.label,
         httpBaseUrl: profile.httpBaseUrl,
         wsBaseUrl: profile.wsBaseUrl,
+        ...(profile.lanPeer ? { lanPeer: profile.lanPeer } : {}),
         ...(profile.learned === undefined ? {} : { learned: profile.learned }),
         ...(profile.authorization === undefined ? {} : { authorization: profile.authorization }),
         ...(tailscale ? { network: "tailscale" as const } : {}),

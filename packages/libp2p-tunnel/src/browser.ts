@@ -4,9 +4,9 @@ import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { identify } from "@libp2p/identify";
 import type { Connection, Stream } from "@libp2p/interface";
 import { peerIdFromString } from "@libp2p/peer-id";
-import { webRTC } from "@libp2p/webrtc";
+import { webRTC, webRTCDirect } from "@libp2p/webrtc";
 import { webSockets } from "@libp2p/websockets";
-import { multiaddr } from "@multiformats/multiaddr";
+import { CODE_P2P, multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import { BROWSER_TUNNEL_PROTOCOL, chunkSize, frame, framedStream } from "./browserProtocol.ts";
 import { PeerWebSocket } from "./browserSocket.ts";
@@ -15,25 +15,41 @@ export async function openBrowserTunnel(input: {
   peerId: string;
   direct: readonly string[];
   relays: readonly string[];
+  refreshDirect?: (signal: AbortSignal) => Promise<readonly string[]>;
 }) {
   const peer = peerIdFromString(input.peerId);
   const circuit = input.relays
-    .filter((addr) => addr.includes("/ws") || addr.includes("/wss"))
+    .filter((addr) => /\/(?:ws|wss)(?:\/|$)/u.test(addr))
     .map((addr) => addr.replace(/\/$/u, "") + "/p2p-circuit");
-  if (!circuit.length) throw new Error("No browser-accessible relay address");
+  const browserAddresses = (addresses: readonly string[]) =>
+    addresses
+      .filter((a) => a.endsWith(`/p2p/${peer}`) && /\/(?:wss|ws|webrtc-direct)(?:\/|$)/u.test(a))
+      .slice(0, 16)
+      .map((addr) => multiaddr(addr));
+  let direct = [
+    ...browserAddresses(input.direct),
+    ...circuit.map((addr) => multiaddr(`${addr}/webrtc/p2p/${peer}`)),
+  ];
+  const relayed = circuit.map((addr) => multiaddr(`${addr}/p2p/${peer}`));
+  if (direct.length === 0 && relayed.length === 0 && !input.refreshDirect) {
+    throw new Error("No browser-accessible tunnel address");
+  }
   const node = await createLibp2p({
-    transports: [webSockets(), webRTC(), circuitRelayTransport()],
+    transports: [webSockets(), webRTC(), webRTCDirect(), circuitRelayTransport()],
+    ...(input.relays.length === 0
+      ? {
+          connectionGater: {
+            denyDialMultiaddr: (address) =>
+              !direct.some(
+                (hint) => hint.equals(address) || hint.decapsulateCode(CODE_P2P).equals(address),
+              ),
+          },
+        }
+      : {}),
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
     services: { identify: identify() },
   });
-  const direct = [
-    ...input.direct.filter(
-      (a) => a.endsWith(`/p2p/${peer}`) && /\/(?:wss|ws|webrtc-direct)(?:\/|$)/u.test(a),
-    ),
-    ...circuit.map((addr) => `${addr}/webrtc/p2p/${peer}`),
-  ].map((addr) => multiaddr(addr));
-  const relayed = circuit.map((addr) => multiaddr(`${addr}/p2p/${peer}`));
   const lifetime = new AbortController();
   let dialing: Promise<Connection> | undefined;
   let upgrading: Promise<unknown> | undefined;
@@ -58,15 +74,26 @@ export async function openBrowserTunnel(input: {
           });
       return Promise.resolve(connections[0]);
     }
-    dialing ??= tryDirect()
-      .catch(() =>
-        node.dial(relayed, {
-          signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]),
-        }),
-      )
-      .finally(() => {
-        dialing = undefined;
+    dialing ??= (async () => {
+      if (direct.length > 0) {
+        try {
+          return await tryDirect();
+        } catch (error) {
+          if (relayed.length === 0 && !input.refreshDirect) throw error;
+        }
+      }
+      if (relayed.length === 0 && input.refreshDirect) {
+        const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)]);
+        direct = browserAddresses(await input.refreshDirect(signal));
+        if (!direct.length) throw new Error("No browser-accessible address for the paired peer");
+        return tryDirect();
+      }
+      return node.dial(relayed, {
+        signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(10_000)]),
       });
+    })().finally(() => {
+      dialing = undefined;
+    });
     return dialing;
   }
   try {

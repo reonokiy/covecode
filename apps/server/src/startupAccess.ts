@@ -1,4 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - The private-network gate guards the node:http server.
+import type { LanPeer } from "@t3tools/contracts";
+import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import * as Option from "effect/Option";
 import type * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -11,7 +14,7 @@ import {
 } from "@t3tools/shared/hostClassification";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { QrCode } from "@t3tools/shared/qrCode";
-import { buildPairingAppLink } from "@t3tools/shared/remote";
+import { buildPairingAppLink, setPairingTokenOnUrl } from "@t3tools/shared/remote";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/http";
@@ -205,12 +208,14 @@ const resolveListeningPort = (address: unknown, fallbackPort: number): number =>
   return fallbackPort;
 };
 
-export const buildPairingUrl = (connectionString: string, token: string): string => {
+export const buildPairingUrl = (
+  connectionString: string,
+  token: string,
+  lanPeer?: LanPeer,
+): string => {
   const url = new URL(connectionString);
   url.pathname = "/pair";
-  url.searchParams.delete("token");
-  url.hash = new URLSearchParams([["token", token]]).toString();
-  return url.toString();
+  return setPairingTokenOnUrl(url, token, lanPeer).toString();
 };
 
 export const renderTerminalQrCode = (value: string, margin = 2): string => {
@@ -265,10 +270,14 @@ export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessI
     { privateNetworkOnly: serverConfig.privateNetworkOnly, platform },
   );
   const issued = yield* serverAuth.issueStartupPairingCredential();
+  const env = Option.getOrUndefined(
+    yield* Effect.serviceOption(ServerEnvironment.ServerEnvironment),
+  );
+  const lanPeer = env ? (yield* env.getDescriptor).lanPeer : undefined;
 
   return {
     connectionString,
     token: issued.credential,
-    pairingUrl: buildPairingUrl(connectionString, issued.credential),
+    pairingUrl: buildPairingUrl(connectionString, issued.credential, lanPeer),
   } satisfies HeadlessServeAccessInfo;
 });

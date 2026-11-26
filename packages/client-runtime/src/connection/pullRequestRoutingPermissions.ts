@@ -52,6 +52,8 @@ function routeConnectionKey(
     const { alias, hostname, username, port } = profile.target;
     return JSON.stringify([target._tag, target.environmentId, alias, hostname, username, port]);
   }
+  if (profile?._tag === "BearerConnectionProfile" && profile.lanPeer)
+    return JSON.stringify([target._tag, target.environmentId, profile.lanPeer.peerId]);
   const baseUrls =
     target._tag === "PrimaryConnectionTarget"
       ? [target.httpBaseUrl, target.wsBaseUrl]

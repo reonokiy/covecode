@@ -2,12 +2,15 @@ import {
   browserTunnelHost,
   registerBrowserTunnelAssets,
 } from "@t3tools/client-runtime/environment";
+import { LanPeer } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { randomUUID } from "../lib/utils";
 import type { EnvironmentTunnelDial } from "@t3tools/client-runtime/relay";
 import { openBrowserTunnel } from "@covecode/libp2p-tunnel/browser";
 
 const peers = new Map<string, Awaited<ReturnType<typeof openBrowserTunnel>>>();
 const assetPaths = new Map<string, Map<string, string>>();
+const decodeLanDescriptor = Schema.decodeUnknownSync(Schema.Struct({ lanPeer: LanPeer }));
 let handlersInstalled = false;
 let installed: Promise<string> | undefined;
 
@@ -146,7 +149,31 @@ export async function openWebPeer(input: EnvironmentTunnelDial) {
       });
   }
   const owner = await installed;
-  const peer = await openBrowserTunnel(input);
+  const discoveryUrl =
+    input.discoveryBaseUrl &&
+    new URL("/.well-known/t3/environment", new URL(input.discoveryBaseUrl).origin);
+  const peer = await openBrowserTunnel({
+    ...input,
+    ...(discoveryUrl && input.relays.length === 0
+      ? {
+          async refreshDirect(signal: AbortSignal) {
+            // Only public address hints may be fetched here. The tunnel checks the original QR pin.
+            const response = await fetch(discoveryUrl, {
+              credentials: "omit",
+              referrerPolicy: "no-referrer",
+              redirect: "error",
+              cache: "no-store",
+              signal,
+            });
+            if (!response.ok) throw new Error("The paired environment is unavailable");
+            const metadata = decodeLanDescriptor(await response.json());
+            if (metadata.lanPeer.peerId !== input.peerId)
+              throw new Error("The environment peer has changed");
+            return metadata.lanPeer.direct;
+          },
+        }
+      : {}),
+  });
   const host = randomUUID().replaceAll("-", "") + ".cove.invalid";
   peers.set(host, peer);
   const paths = new Map<string, string>();

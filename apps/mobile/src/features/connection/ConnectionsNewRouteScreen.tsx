@@ -24,7 +24,12 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { AppText as Text, AppTextInput, type AppTextInputProps } from "../../components/ui/AppText";
 import { FrostedCutout } from "../../components/ui/FrostedCutout";
-import { buildPairingUrl, extractPairingUrlFromQrPayload, parsePairingUrl } from "./pairing";
+import {
+  buildPairingUrl,
+  extractPairingUrlFromQrPayload,
+  parsePairingUrl,
+  resolveRoutePairingUrl,
+} from "./pairing";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { CloudEnvironmentRows } from "./CloudEnvironmentRows";
@@ -45,8 +50,8 @@ export function ConnectionsNewRouteScreen({
   route,
 }: StaticScreenProps<ConnectionsNewRouteParams | undefined>) {
   const params = route.params ?? {};
-  // Dev-only prefill prevents production links from supplying an attacker-chosen host and token.
-  const routePairingUrl = __DEV__ ? (params.pairingUrl?.trim() ?? "") : "";
+  // Production links prefill only when they carry a valid peer identity pin.
+  const routePairingUrl = resolveRoutePairingUrl(params.pairingUrl);
   // A new prefill link replaces whatever the form held.
   return (
     <PairingForm
@@ -69,7 +74,10 @@ function PairingForm({
     useRemoteConnections();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [initialPairing] = useState(() => parsePairingUrl(routePairingUrl || connectionPairingUrl));
+  const [sourcePairingUrl, setSourcePairingUrl] = useState(() =>
+    (routePairingUrl || connectionPairingUrl).trim(),
+  );
+  const [initialPairing] = useState(() => parsePairingUrl(sourcePairingUrl));
   const [hostInput, setHostInput] = useState(initialPairing.host);
   const [codeInput, setCodeInput] = useState(initialPairing.code);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -86,8 +94,8 @@ function PairingForm({
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const screenFocused = useIsFocused();
   const [scannerLocked, setScannerLocked] = useState(false);
-  // A good scan parks the camera so it can't re-read the code over later edits.
-  const [scanComplete, setScanComplete] = useState(false);
+  // A good scan or prefilled pairing link parks the camera so it can't re-read the code over later edits.
+  const [scanComplete, setScanComplete] = useState(routePairingUrl.length > 0);
 
   const headerIconColor = useUniwindTheme()["--color-icon"];
 
@@ -99,18 +107,33 @@ function PairingForm({
   };
 
   const handleHostChange = (value: string) => {
-    const pairing = parsePairingUrl(value);
+    const trimmed = value.trim();
+    const unwrapped = trimmed ? extractPairingUrlFromQrPayload(trimmed) : "";
+    const pairing = parsePairingUrl(unwrapped);
     if (pairing.code) {
       setHostInput(pairing.host);
       setCodeInput(pairing.code);
+      setSourcePairingUrl(unwrapped);
+      onChangeConnectionPairingUrl(unwrapped);
     } else {
       setHostInput(value);
+      setSourcePairingUrl("");
     }
     clearError();
   };
 
   const handleCodeChange = (value: string) => {
-    setCodeInput(value);
+    const trimmed = value.trim();
+    const unwrapped = trimmed ? extractPairingUrlFromQrPayload(trimmed) : "";
+    const pairing = unwrapped.includes("://") ? parsePairingUrl(unwrapped) : { host: "", code: "" };
+    if (pairing.host && pairing.code) {
+      setHostInput(pairing.host);
+      setCodeInput(pairing.code);
+      setSourcePairingUrl(unwrapped);
+      onChangeConnectionPairingUrl(unwrapped);
+    } else {
+      setCodeInput(value);
+    }
     clearError();
   };
 
@@ -131,37 +154,7 @@ function PairingForm({
     );
   };
 
-  const handleQrScan = ({ data }: { readonly data: string }) => {
-    if (scannerLocked) {
-      return;
-    }
-
-    setScannerLocked(true);
-
-    try {
-      const pairingUrl = extractPairingUrlFromQrPayload(data);
-      const { host, code } = parsePairingUrl(pairingUrl);
-      setHostInput(host);
-      setCodeInput(code);
-      onChangeConnectionPairingUrl(pairingUrl);
-      setScanComplete(true);
-      setScannerLocked(false);
-    } catch (error) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Dialog.alert(
-        gt("Invalid QR code"),
-        error instanceof Error
-          ? (errorDisplayMessage(error, m) ?? error.message)
-          : gt("Scanned QR code was not recognized."),
-      );
-      setTimeout(() => {
-        setScannerLocked(false);
-      }, 600);
-    }
-  };
-
-  const handleSubmit = async () => {
-    const pairingUrl = buildPairingUrl(hostInput, codeInput);
+  const submitPairingUrl = async (pairingUrl: string) => {
     setOwnAttempt(true);
     setSubmitError(null);
     setIsSubmitting(true);
@@ -183,6 +176,47 @@ function PairingForm({
         leaveSettingsPage(navigation, workspaceHasColumns(), "SettingsEnvironments");
       }
     }
+  };
+
+  const handleQrScan = ({ data }: { readonly data: string }) => {
+    if (scannerLocked || connecting) {
+      return;
+    }
+
+    setScannerLocked(true);
+
+    let pairingUrl: string;
+    try {
+      pairingUrl = extractPairingUrlFromQrPayload(data);
+    } catch (error) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Dialog.alert(
+        gt("Invalid QR code"),
+        error instanceof Error
+          ? (errorDisplayMessage(error, m) ?? error.message)
+          : gt("Scanned QR code was not recognized."),
+      );
+      setTimeout(() => {
+        setScannerLocked(false);
+      }, 600);
+      return;
+    }
+
+    const { host, code } = parsePairingUrl(pairingUrl);
+    setHostInput(host);
+    setCodeInput(code);
+    setSourcePairingUrl(pairingUrl);
+    onChangeConnectionPairingUrl(pairingUrl);
+    setScanComplete(true);
+    setScannerLocked(false);
+    if (host.trim().length > 0 && code.trim().length > 0) {
+      void submitPairingUrl(pairingUrl);
+    }
+  };
+
+  const handleSubmit = async () => {
+    const pairingUrl = buildPairingUrl(hostInput, codeInput, sourcePairingUrl);
+    await submitPairingUrl(pairingUrl);
   };
 
   return (

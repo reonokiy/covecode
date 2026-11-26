@@ -1,10 +1,13 @@
-import { type DesktopWslState, EnvironmentId } from "@t3tools/contracts";
+import { type AdvertisedEndpoint, type DesktopWslState, EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
   isServerNetworkAccessible,
   parseManualDesktopSshTarget,
+  parsePairingUrlFields,
+  parseRemotePairingFields,
   resolveAccessEnvironmentId,
+  resolveAdvertisedEndpointPairingUrl,
   resolveCurrentOriginPairingUrl,
   resolveTailscaleServeBaseUrl,
   selectQrEndpointOption,
@@ -235,5 +238,91 @@ describe("isServerNetworkAccessible", () => {
     { authPolicy: null, directEndpoints: served, expected: false },
   ] as const)("$authPolicy with $directEndpoints.length endpoints", (row) => {
     expect(isServerNetworkAccessible(row)).toBe(row.expected);
+  });
+});
+
+describe("LAN pairing URL preservation and endpoint QR resolution", () => {
+  const lanUrl =
+    "http://192.168.1.44:3773/pair#token=PAIRCODE&peer=12D3KooWPeerId&addr=%2Fip4%2F192.168.1.44%2Ftcp%2F4100%2Fp2p%2F12D3KooWPeerId&addr=%2Fip4%2F192.168.1.44%2Ftcp%2F4101%2Fws%2Fp2p%2F12D3KooWPeerId";
+
+  it("keeps the full LAN pairing URL across paste, app link, and form submission", () => {
+    const parsed = parsePairingUrlFields(
+      `covecode://pair?pairingUrl=${encodeURIComponent(lanUrl)}`,
+    );
+    expect(parsed).toEqual({
+      pairingUrl: lanUrl,
+      host: "http://192.168.1.44:3773",
+      pairingCode: "PAIRCODE",
+    });
+
+    expect(
+      parseRemotePairingFields({
+        host: parsed!.host,
+        pairingCode: parsed!.pairingCode,
+        pairingUrl: parsed!.pairingUrl,
+      }),
+    ).toEqual({
+      pairingUrl: lanUrl,
+      host: "http://192.168.1.44:3773",
+      pairingCode: "PAIRCODE",
+    });
+
+    expect(
+      parseRemotePairingFields({
+        host: "http://192.168.1.99:3773",
+        pairingCode: "PAIRCODE",
+        pairingUrl: parsed!.pairingUrl,
+      }),
+    ).toEqual({
+      host: "http://192.168.1.99:3773",
+      pairingCode: "PAIRCODE",
+    });
+  });
+
+  it("embeds peer and repeated addr into the fragment for LAN endpoints only", () => {
+    const lanPeer = {
+      peerId: "12D3KooWPeerId",
+      direct: [
+        "/ip4/192.168.1.44/tcp/4100/p2p/12D3KooWPeerId",
+        "/ip4/192.168.1.44/tcp/4101/ws/p2p/12D3KooWPeerId",
+      ],
+    };
+    const lanEndpoint: AdvertisedEndpoint = {
+      id: "desktop-lan:http://192.168.1.44:3773",
+      label: "Local network",
+      provider: { id: "desktop-core", label: "Desktop", kind: "core", isAddon: false },
+      httpBaseUrl: "http://192.168.1.44:3773",
+      wsBaseUrl: "ws://192.168.1.44:3773",
+      reachability: "lan",
+      compatibility: { hostedHttpsApp: "mixed-content-blocked", desktopApp: "compatible" },
+      source: "desktop-core",
+      status: "available",
+    };
+    expect(resolveAdvertisedEndpointPairingUrl(lanEndpoint, "PAIRCODE", lanPeer)).toBe(lanUrl);
+    expect(resolveCurrentOriginPairingUrl("PAIRCODE", lanEndpoint.httpBaseUrl, lanPeer)).toBe(
+      lanUrl,
+    );
+    expect(
+      resolveAdvertisedEndpointPairingUrl(
+        {
+          ...lanEndpoint,
+          httpBaseUrl: lanEndpoint.httpBaseUrl.replace("http:", "https:"),
+          compatibility: { hostedHttpsApp: "compatible", desktopApp: "compatible" },
+        },
+        "PAIRCODE",
+        lanPeer,
+      ),
+    ).toBe(lanUrl.replace("http:", "https:"));
+
+    const tailscaleIpEndpoint: AdvertisedEndpoint = {
+      ...lanEndpoint,
+      id: "tailscale-ip:http://100.84.12.7:3773",
+      httpBaseUrl: "http://100.84.12.7:3773",
+      wsBaseUrl: "ws://100.84.12.7:3773",
+      reachability: "private-network",
+    };
+    expect(resolveAdvertisedEndpointPairingUrl(tailscaleIpEndpoint, "PAIRCODE", lanPeer)).toBe(
+      "http://100.84.12.7:3773/pair#token=PAIRCODE",
+    );
   });
 });

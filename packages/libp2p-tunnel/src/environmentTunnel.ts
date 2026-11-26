@@ -7,9 +7,11 @@ import {
 } from "@libp2p/circuit-relay-v2";
 import { dcutr } from "@libp2p/dcutr";
 import { identify, identifyPush } from "@libp2p/identify";
-import type { Connection, Listener, PrivateKey } from "@libp2p/interface";
+import multicastDns from "multicast-dns";
+import { isPrivate } from "@libp2p/utils";
+import type { Libp2p, Connection, Listener, PrivateKey } from "@libp2p/interface";
 import { tcp } from "@libp2p/tcp";
-import { webRTC } from "@libp2p/webrtc";
+import { webRTC, webRTCDirect } from "@libp2p/webrtc";
 import { BROWSER_TUNNEL_PROTOCOL } from "./browserProtocol.ts";
 import { serveBrowserStream } from "./browserBridge.ts";
 import { webSockets } from "@libp2p/websockets";
@@ -70,6 +72,111 @@ export class TunnelRegistrationUnauthorizedError extends Error {
     super(message);
     this.name = "TunnelRegistrationUnauthorizedError";
   }
+}
+
+async function handleEnvironmentStreams(node: Libp2p, localHost: string, localPort: number) {
+  await node.handle(
+    COVE_TUNNEL_PROTOCOL,
+    (stream) => {
+      const targetSocket = NodeNet.connect({
+        host: localHost,
+        port: localPort,
+      });
+      pipeStreamAndSocket(stream, targetSocket);
+    },
+    {
+      runOnLimitedConnection: true,
+      maxInboundStreams: 256,
+      maxOutboundStreams: 256,
+    },
+  );
+
+  await node.handle(
+    BROWSER_TUNNEL_PROTOCOL,
+    (stream) => serveBrowserStream(stream, localHost, localPort),
+    {
+      runOnLimitedConnection: true,
+      maxInboundStreams: 256,
+      maxOutboundStreams: 256,
+    },
+  );
+}
+
+export async function createLanEnvironmentTunnel(options: {
+  readonly bindHost: string;
+  readonly localPort: number;
+  readonly keyPath: string;
+}) {
+  const listenHost = options.bindHost === "::" ? "0.0.0.0" : options.bindHost;
+  const privateKey = await loadOrCreateLibp2pPrivateKey(options.keyPath);
+  const node = await createLibp2p({
+    privateKey,
+    addresses: {
+      listen: [`/ip4/${listenHost}/tcp/0`, `/ip4/${listenHost}/udp/0/webrtc-direct`],
+      announceFilter: (addresses) =>
+        addresses.filter(
+          (addr) =>
+            isPrivate(addr) &&
+            (options.bindHost.startsWith("127.") || !addr.toString().startsWith("/ip4/127.")),
+        ),
+    },
+    connectionGater: {
+      denyInboundConnection: (conn) => !isPrivate(conn.remoteAddr),
+      denyDialPeer: () => true,
+    },
+    transports: [tcp(), webRTCDirect()],
+    connectionEncrypters: [noise()],
+    streamMuxers: [yamux()],
+    services: { identify: identify() },
+  });
+  try {
+    await handleEnvironmentStreams(
+      node,
+      options.bindHost === "::" ? "::1" : listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost,
+      options.localPort,
+    );
+  } catch (error) {
+    await node.stop();
+    throw error;
+  }
+  const peerId = node.peerId.toString();
+  const getPeer = () => ({ peerId, direct: node.getMultiaddrs().map(String) });
+  const service = "_p2p._udp.local";
+  const instance = peerId + "." + service;
+  const dns = multicastDns(
+    listenHost === "0.0.0.0" ? {} : { interface: listenHost, bind: "0.0.0.0" },
+  );
+  dns.on("error", (error) =>
+    node.logger.forComponent("cove:lan").error("LAN discovery error: %e", error),
+  );
+  dns.on("query", ({ questions = [] }) => {
+    const browse = questions.some((q) => q.type === "PTR" && q.name.toLowerCase() === service);
+    const lookup = questions.some(
+      (q) => q.type === "TXT" && q.name.toLowerCase() === instance.toLowerCase(),
+    );
+    if (!browse && !lookup) return;
+    const data = getPeer()
+      .direct.slice(0, 16)
+      .map((address) => "dnsaddr=" + address);
+    if (!data.length) return;
+    const txt = { type: "TXT" as const, name: instance, ttl: 10, data };
+    // libp2p browsers read the additional TXT record. Apple Bonjour can query it by name.
+    dns.respond(
+      lookup
+        ? { answers: [txt] }
+        : {
+            answers: [{ type: "PTR", name: service, ttl: 10, data: instance }],
+            additionals: [txt],
+          },
+    );
+  });
+  return {
+    getPeer,
+    async stop() {
+      await new Promise<void>((resolve) => dns.destroy(resolve));
+      await node.stop();
+    },
+  };
 }
 
 export async function createEnvironmentLibp2pTunnel(
@@ -160,31 +267,7 @@ export async function createEnvironmentLibp2pTunnel(
     });
   };
 
-  await node.handle(
-    COVE_TUNNEL_PROTOCOL,
-    (stream) => {
-      const targetSocket = NodeNet.connect({
-        host: options.localHost,
-        port: options.localPort,
-      });
-      pipeStreamAndSocket(stream, targetSocket);
-    },
-    {
-      runOnLimitedConnection: true,
-      maxInboundStreams: 256,
-      maxOutboundStreams: 256,
-    },
-  );
-
-  await node.handle(
-    BROWSER_TUNNEL_PROTOCOL,
-    (stream) => serveBrowserStream(stream, options.localHost, options.localPort),
-    {
-      runOnLimitedConnection: true,
-      maxInboundStreams: 256,
-      maxOutboundStreams: 256,
-    },
-  );
+  await handleEnvironmentStreams(node, options.localHost, options.localPort);
 
   const dialAndRegister = async (addresses: readonly string[]): Promise<Connection> => {
     let lastError: unknown;

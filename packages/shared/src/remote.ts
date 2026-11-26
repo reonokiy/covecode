@@ -1,3 +1,4 @@
+import type { LanPeer } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { parseUrl } from "./url.ts";
@@ -134,6 +135,7 @@ const toWsBaseUrl = (url: URL): string => {
 };
 
 export interface ResolvedRemotePairingTarget {
+  readonly lanPeer?: LanPeer;
   readonly credential: string;
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
@@ -166,10 +168,22 @@ export const stripPairingTokenFromUrl = (url: URL): URL => {
   return next;
 };
 
-export const setPairingTokenOnUrl = (url: URL, credential: string): URL => {
+export const setPairingTokenOnUrl = (
+  url: URL,
+  credential: string,
+  lanPeer?: LanPeer | null,
+): URL => {
   const next = new URL(url.toString());
   next.searchParams.delete(PAIRING_TOKEN_PARAM);
-  next.hash = new URLSearchParams([[PAIRING_TOKEN_PARAM, credential]]).toString();
+  const fragment = new URLSearchParams([[PAIRING_TOKEN_PARAM, credential]]);
+  if (lanPeer) {
+    fragment.set("peer", lanPeer.peerId);
+    const matching = lanPeer.direct.filter((addr) => addr.startsWith(`/ip4/${url.hostname}/`));
+    for (const address of (matching.length ? matching : lanPeer.direct).slice(0, 4)) {
+      fragment.append("addr", address);
+    }
+  }
+  next.hash = fragment.toString();
   return next;
 };
 
@@ -202,6 +216,30 @@ export const readPairingAppLink = (value: string): string | null => {
   return url.searchParams.get(PAIRING_APP_LINK_PARAM)?.trim() || null;
 };
 
+const lanMultiaddr =
+  /^\/ip4\/\d{1,3}(?:\.\d{1,3}){3}\/(?:tcp\/\d{1,5}(?:\/ws)?|udp\/\d{1,5}\/webrtc-direct\/certhash\/[a-zA-Z0-9_-]+)\/p2p\/[1-9A-HJ-NP-Za-km-z]+$/u;
+
+function pairingLanPeer(url: URL): LanPeer | undefined {
+  const fragment = readHashParams(url);
+  const pins = fragment.getAll("peer");
+  const direct = fragment.getAll("addr");
+  if (pins.length === 0 && direct.length === 0) return undefined;
+  const peerId = pins[0];
+  if (
+    pins.length !== 1 ||
+    !peerId ||
+    !/^12D3KooW[1-9A-HJ-NP-Za-km-z]{44}$/u.test(peerId) ||
+    direct.length > 16 ||
+    direct.some(
+      (address) =>
+        address.length > 256 || !lanMultiaddr.test(address) || !address.endsWith("/p2p/" + peerId),
+    )
+  ) {
+    throw new RemotePairingUrlInvalidError({});
+  }
+  return { peerId, direct };
+}
+
 export const resolveRemotePairingTarget = (input: {
   readonly pairingUrl?: string;
   readonly host?: string;
@@ -220,6 +258,8 @@ export const resolveRemotePairingTarget = (input: {
         protocol: url.protocol,
       });
     }
+    const lanPeer = pairingLanPeer(url);
+    const pin = lanPeer ? { lanPeer } : {};
     const hostedPairingRequest = readHostedPairingRequest(url);
     if (hostedPairingRequest) {
       const hostedBackendUrl = normalizeRemoteBaseUrl(
@@ -227,6 +267,7 @@ export const resolveRemotePairingTarget = (input: {
         "hosted-pairing-host",
       );
       return {
+        ...pin,
         credential: hostedPairingRequest.token,
         httpBaseUrl: toHttpBaseUrl(hostedBackendUrl),
         wsBaseUrl: toWsBaseUrl(hostedBackendUrl),
@@ -238,6 +279,7 @@ export const resolveRemotePairingTarget = (input: {
       throw new RemotePairingTokenMissingError({ host: url.host });
     }
     return {
+      ...pin,
       credential,
       httpBaseUrl: toHttpBaseUrl(url),
       wsBaseUrl: toWsBaseUrl(url),

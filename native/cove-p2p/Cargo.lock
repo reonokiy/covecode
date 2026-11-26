@@ -418,6 +418,7 @@ name = "cove-p2p"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cc",
  "futures",
  "http-body-util",
  "hyper",

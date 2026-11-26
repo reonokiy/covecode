@@ -1,3 +1,6 @@
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 import { noise } from "@chainsafe/libp2p-noise";
@@ -10,10 +13,13 @@ import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { WebSocket, WebSocketServer } from "ws";
+import { serveBrowserStream } from "./browserBridge.ts";
+import { BROWSER_TUNNEL_PROTOCOL } from "./browserProtocol.ts";
 
 import {
   createClientLibp2pProxy,
   createEnvironmentLibp2pTunnel,
+  createLanEnvironmentTunnel,
   createRelayLibp2pNode,
   isAllowedLoopbackHost,
   TunnelRegistrationUnauthorizedError,
@@ -146,6 +152,31 @@ describe("libp2p-tunnel", () => {
     expect(isAllowedLoopbackHost("example.com")).toBe(false);
   });
 
+  it("keeps a directly dialable LAN identity across host restarts without a relay", async () => {
+    const home = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cove-lan-test-"));
+    cleanups.push(() => NodeFSP.rm(home, { recursive: true, force: true }));
+    const origin = await startOriginFixture();
+    cleanups.push(origin.close);
+    const config = {
+      bindHost: "127.0.0.1",
+      localPort: origin.port,
+      keyPath: NodePath.join(home, "lan.key"),
+    };
+    const first = await createLanEnvironmentTunnel(config);
+    const paired = first.getPeer();
+    await first.stop();
+    const host = await createLanEnvironmentTunnel(config);
+    cleanups.push(host.stop);
+    expect(host.getPeer().peerId).toBe(paired.peerId);
+    const proxy = await createClientLibp2pProxy({
+      targetPeerId: paired.peerId,
+      directMultiaddrs: host.getPeer().direct,
+      relayMultiaddrs: [],
+    });
+    cleanups.push(proxy.stop);
+    expect(await proxy.connect()).toBe("direct");
+    expect(await (await fetch(proxy.httpBaseUrl + "/healthz")).json()).toMatchObject({ ok: true });
+  });
   it("rejects non-loopback localHost in createEnvironmentLibp2pTunnel", async () => {
     await expect(
       createEnvironmentLibp2pTunnel({
@@ -393,6 +424,32 @@ describe("libp2p-tunnel", () => {
       expect(await closed).toMatchObject({ code: 4001, reason: "finished", wasClean: true });
     },
   );
+
+  it("connects the browser directly when the relay has no WebSocket address", async () => {
+    const origin = await startOriginFixture();
+    cleanups.push(origin.close);
+    const environment = await createLibp2p({
+      addresses: { listen: ["/ip4/127.0.0.1/tcp/0/ws"] },
+      transports: [webSockets()],
+      connectionEncrypters: [noise()],
+      streamMuxers: [yamux()],
+    });
+    cleanups.push(async () => environment.stop());
+    await environment.handle(BROWSER_TUNNEL_PROTOCOL, (stream) =>
+      serveBrowserStream(stream, "127.0.0.1", origin.port),
+    );
+
+    const { openBrowserTunnel } = await import("./browser.ts");
+    const browser = await openBrowserTunnel({
+      peerId: environment.peerId.toString(),
+      direct: environment.getMultiaddrs().map(String),
+      relays: [`/ip4/127.0.0.1/tcp/4001/p2p/${environment.peerId}`],
+    });
+    cleanups.push(() => browser.close());
+    expect(browser.getActiveTransport()).toBe("direct");
+    const response = await browser.fetch(new Request("https://client.invalid/healthz"));
+    expect(await response.json()).toMatchObject({ ok: true, path: "/healthz" });
+  });
 
   it("proxies HTTP and WebSockets via createClientLibp2pProxy in both relay and p2p modes", async () => {
     const origin = await startOriginFixture();

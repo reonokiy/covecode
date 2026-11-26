@@ -69,9 +69,12 @@ import {
   devAutoConnectAttemptAtom,
   pairingFormLinkAction,
   startDevAutoConnect,
+  withoutPairingTarget,
 } from "./devAutoConnect";
 
 const PAIRING_URL = "http://192.168.1.10:3773/pair#token=abc";
+const VALID_PEER_ID = "12D3KooW11111111111111111111111111111111111111111111";
+const PINNED_PAIRING_URL = `http://192.168.1.10:3773/pair#token=abc&peer=${VALID_PEER_ID}&addr=${encodeURIComponent(`/ip4/192.168.1.10/tcp/4100/p2p/${VALID_PEER_ID}`)}`;
 
 function settingsLink(params: object): PartialState<NavigationState> {
   return {
@@ -253,4 +256,70 @@ it("a pairing link fills the pairing form already on screen instead of stacking 
     key: open.routes[2]!.key,
     params: { pairingUrl: PAIRING_URL },
   });
+});
+
+it("routes a valid peer-pinned pair app link to the pairing form without auto-connecting", () => {
+  harness.pair.mockClear();
+  const linking = {
+    initialRouteName: "Home",
+    screens: {
+      Home: "",
+      Settings: "settings",
+      SettingsEnvironmentNew: "settings/environment-new",
+      ConnectionsNew: { path: "connections/new", alias: ["pair"] },
+    },
+  };
+  const router = StackRouter({});
+  const options = {
+    routeNames: Object.keys(linking.screens),
+    routeParamList: {},
+    routeGetIdList: {},
+  };
+
+  vi.stubGlobal("__DEV__", false);
+  const coldStartPath = `pair?pairingUrl=${encodeURIComponent(PINNED_PAIRING_URL)}&autoConnect=1&routeFor=env-1`;
+  const coldStartState = startDevAutoConnect(
+    withoutPairingTarget(getStateFromPath(coldStartPath, linking), coldStartPath),
+  );
+  expect(coldStartState?.routes.map((route) => route.name)).toEqual(["Home", "ConnectionsNew"]);
+  expect(coldStartState?.routes.at(-1)?.params).toEqual({ pairingUrl: PINNED_PAIRING_URL });
+  expect(harness.pair).not.toHaveBeenCalled();
+
+  // Foreground when another screen is active opens ConnectionsNew with the pinned URL.
+  const homeOpen = router.getRehydratedState({ index: 0, routes: [{ name: "Home" }] }, options);
+  const foregroundAction =
+    pairingFormLinkAction(coldStartState!, homeOpen) ??
+    getActionFromState(coldStartState!, linking)!;
+  const foregroundNext = router.getStateForAction(
+    homeOpen,
+    { target: homeOpen.key, ...foregroundAction },
+    options,
+  );
+  expect(foregroundNext?.routes.map((route) => route.name)).toEqual(["Home", "ConnectionsNew"]);
+  expect(foregroundNext?.routes.at(-1)?.params).toEqual({ pairingUrl: PINNED_PAIRING_URL });
+
+  // Foreground when the pairing form is already open updates it in place.
+  const formOpen = router.getRehydratedState(
+    { index: 1, routes: [{ name: "Home" }, { name: "ConnectionsNew" }] },
+    options,
+  );
+  const inPlaceAction =
+    pairingFormLinkAction(coldStartState!, formOpen) ??
+    getActionFromState(coldStartState!, linking)!;
+  const inPlaceNext = router.getStateForAction(
+    formOpen,
+    { target: formOpen.key, ...inPlaceAction },
+    options,
+  );
+  expect(inPlaceNext?.routes.map((route) => route.name)).toEqual(["Home", "ConnectionsNew"]);
+  expect(inPlaceNext?.routes.at(-1)).toMatchObject({
+    key: formOpen.routes[1]!.key,
+    params: { pairingUrl: PINNED_PAIRING_URL },
+  });
+
+  // Unpinned or invalid pair links are rejected.
+  const unpinnedPath = `pair?pairingUrl=${encodeURIComponent(PAIRING_URL)}`;
+  expect(
+    withoutPairingTarget(getStateFromPath(unpinnedPath, linking), unpinnedPath),
+  ).toBeUndefined();
 });

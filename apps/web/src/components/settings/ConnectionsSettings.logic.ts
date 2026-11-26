@@ -2,9 +2,22 @@ import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import * as DateTime from "effect/DateTime";
 import { msg } from "gt-react";
 
-import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
+import {
+  type PairingLanPeer,
+  resolveDesktopPairingUrl,
+  resolveHostedPairingUrl,
+} from "./pairingUrls";
+import {
+  getPairingTokenFromUrl,
+  readPairingAppLink,
+  setPairingTokenOnUrl,
+} from "@t3tools/shared/remote";
 import { readHostedPairingRequest } from "../../hostedPairing";
+import {
+  isPrivateNetworkHost,
+  isSharedAddressSpaceHost,
+  isTailnetHost,
+} from "@t3tools/shared/hostClassification";
 import { m, type MessageResolver } from "../../i18n/messages";
 import {
   isLoopbackHostname,
@@ -246,21 +259,40 @@ export function parseManualDesktopSshTarget(
   };
 }
 
+function replaceTokenOnPairingUrl(pairingUrl: string, token: string): string {
+  const url = new URL(pairingUrl);
+  url.searchParams.delete("token");
+  const existingHashParams = new URLSearchParams(
+    url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
+  );
+  const nextHashParams = new URLSearchParams([["token", token]]);
+  for (const [key, value] of existingHashParams) {
+    if (key !== "token") {
+      nextHashParams.append(key, value);
+    }
+  }
+  url.hash = nextHashParams.toString();
+  return url.toString();
+}
+
 export function parsePairingUrlFields(
   input: string,
-): { readonly host: string; readonly pairingCode: string } | null {
+): { readonly pairingUrl: string; readonly host: string; readonly pairingCode: string } | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
+  const candidate = readPairingAppLink(trimmed) ?? trimmed;
   try {
     const urlLikeInput =
-      /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//u.test(trimmed) || trimmed.startsWith("//")
-        ? trimmed
-        : `https://${trimmed}`;
-    const url = new URL(urlLikeInput, window.location.origin);
+      /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//u.test(candidate) || candidate.startsWith("//")
+        ? candidate
+        : `https://${candidate}`;
+    const baseOrigin = typeof window === "undefined" ? undefined : window.location?.origin;
+    const url = baseOrigin ? new URL(urlLikeInput, baseOrigin) : new URL(urlLikeInput);
     const hostedPairingRequest = readHostedPairingRequest(url);
     if (hostedPairingRequest) {
       return {
+        pairingUrl: url.toString(),
         host: hostedPairingRequest.host,
         pairingCode: hostedPairingRequest.token,
       };
@@ -269,6 +301,7 @@ export function parsePairingUrlFields(
     const pairingCode = getPairingTokenFromUrl(url);
     if (!pairingCode) return null;
     return {
+      pairingUrl: url.toString(),
       host: url.origin,
       pairingCode,
     };
@@ -281,22 +314,51 @@ export function parseRemotePairingFields(
   input: {
     readonly host: string;
     readonly pairingCode: string;
+    readonly pairingUrl?: string | null;
   },
   resolve: MessageResolver = m,
 ): {
+  readonly pairingUrl?: string;
   readonly host: string;
   readonly pairingCode: string;
 } {
-  const parsedPairingUrl = parsePairingUrlFields(input.host);
-  if (parsedPairingUrl) return parsedPairingUrl;
+  const explicitCode = input.pairingCode.trim();
+  const parsedFromHost = parsePairingUrlFields(input.host);
+  if (parsedFromHost) {
+    const pairingCode = explicitCode || parsedFromHost.pairingCode;
+    return {
+      pairingUrl:
+        pairingCode === parsedFromHost.pairingCode
+          ? parsedFromHost.pairingUrl
+          : replaceTokenOnPairingUrl(parsedFromHost.pairingUrl, pairingCode),
+      host: parsedFromHost.host,
+      pairingCode,
+    };
+  }
+
+  const parsedFromCode = parsePairingUrlFields(input.pairingCode);
+  if (parsedFromCode && (!input.host.trim() || input.host.trim() === parsedFromCode.host)) {
+    return parsedFromCode;
+  }
 
   const host = input.host.trim();
-  const pairingCode = input.pairingCode.trim();
+  const pairingCode = explicitCode;
   if (!host) {
     throw new Error(resolve(msg("Enter a backend host.")));
   }
   if (!pairingCode) {
     throw new Error(resolve(msg("Enter a pairing code.")));
+  }
+  const parsedSource = input.pairingUrl ? parsePairingUrlFields(input.pairingUrl) : null;
+  if (parsedSource && parsedSource.host === host) {
+    return {
+      pairingUrl:
+        pairingCode === parsedSource.pairingCode
+          ? parsedSource.pairingUrl
+          : replaceTokenOnPairingUrl(parsedSource.pairingUrl, pairingCode),
+      host,
+      pairingCode,
+    };
   }
   return { host, pairingCode };
 }
@@ -439,7 +501,11 @@ export function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): stri
 export function resolveAdvertisedEndpointPairingUrl(
   endpoint: AdvertisedEndpoint,
   credential: string,
+  lanPeer?: PairingLanPeer | null,
 ): string {
+  if (endpoint.reachability === "lan" && lanPeer) {
+    return resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential, lanPeer);
+  }
   if (endpoint.compatibility.hostedHttpsApp === "compatible") {
     return (
       resolveHostedPairingUrl(endpoint.httpBaseUrl, credential) ??
@@ -452,13 +518,18 @@ export function resolveAdvertisedEndpointPairingUrl(
 export function resolveCurrentOriginPairingUrl(
   credential: string,
   currentHref: string = window.location.href,
+  lanPeer?: PairingLanPeer | null,
 ): string | null {
   const url = new URL("/pair", currentHref);
   // The packaged desktop window loads from covecode://app, which no other device can open.
   if ((url.protocol !== "http:" && url.protocol !== "https:") || isLoopbackHostname(url.hostname)) {
     return null;
   }
-  return setPairingTokenOnUrl(url, credential).toString();
+  const lan =
+    isPrivateNetworkHost(url.hostname) &&
+    !isTailnetHost(url.hostname) &&
+    !isSharedAddressSpaceHost(url.hostname);
+  return setPairingTokenOnUrl(url, credential, lan ? lanPeer : undefined).toString();
 }
 
 export function isHostedAppPairingUrl(value: string): boolean {

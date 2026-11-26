@@ -7,6 +7,7 @@ import React, { startTransition, useEffect, useEffectEvent, useRef, useState } f
 import { connectPairing } from "../../connection/onboarding";
 import {
   peekPairingTokenFromUrl,
+  peekPinnedPairingAppLinkFromUrl,
   stripPairingTokenFromUrl,
   submitServerAuthCredential,
 } from "../../environments/primary";
@@ -40,9 +41,12 @@ export function PairingRouteSurface({
 }) {
   const gt = useGT();
   const messages = useMessages();
+  const [pinnedPairing] = useState(() => peekPinnedPairingAppLinkFromUrl());
   const [autoPairToken] = useState(peekPairingTokenFromUrl);
   const [credential, setCredential] = useState(autoPairToken ?? "");
-  const [errorMessage, setErrorMessage] = useState(initialErrorMessage ?? "");
+  const [errorMessage, setErrorMessage] = useState(
+    initialErrorMessage ?? pinnedPairing?.errorMessage ?? "",
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const autoSubmitAttemptedRef = useRef(false);
 
@@ -78,6 +82,10 @@ export function PairingRouteSurface({
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- strips the pairing token from the URL and submits it once when the route carries one
   useEffect(() => {
+    if (pinnedPairing) {
+      stripPairingTokenFromUrl();
+      return;
+    }
     if (!autoPairToken || autoSubmitAttemptedRef.current) {
       return;
     }
@@ -85,7 +93,32 @@ export function PairingRouteSurface({
     autoSubmitAttemptedRef.current = true;
     stripPairingTokenFromUrl();
     autoSubmit(autoPairToken);
-  }, [autoPairToken]);
+  }, [autoPairToken, pinnedPairing]);
+
+  if (pinnedPairing) {
+    return (
+      <StandalonePage>
+        <StandalonePageHeader
+          title={gt("Pair with this environment")}
+          description={gt("Pair another environment to this client.")}
+        />
+
+        {errorMessage ? (
+          <Alert variant="error" className="mt-5">
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {pinnedPairing.appLink ? (
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Button render={<a href={pinnedPairing.appLink} />} size="sm">
+              {gt("Open in app")}
+            </Button>
+          </div>
+        ) : null}
+      </StandalonePage>
+    );
+  }
 
   return (
     <StandalonePage>
@@ -146,6 +179,7 @@ export function HostedPairingRouteSurface() {
     reportFailure: false,
   });
   const [request] = useState(readHostedPairingRequest);
+  const [pairingUrl] = useState(() => window.location.href);
   const gt = useGT();
   const [status, setStatus] = useState<"pairing" | "paired" | "error">(
     request ? "pairing" : "error",
@@ -182,6 +216,7 @@ export function HostedPairingRouteSurface() {
     tokenSubmittedRef.current = true;
 
     const result = await connectPairingEnvironment({
+      pairingUrl,
       host: request.host,
       pairingCode: request.token,
     });

@@ -1,4 +1,4 @@
-import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@t3tools/contracts";
+import { DesktopSshEnvironmentTargetSchema, EnvironmentId, LanPeer } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -20,6 +20,7 @@ export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnection
   "BearerConnectionProfile",
   {
     ...ConnectionProfileBase,
+    lanPeer: Schema.optionalKey(LanPeer),
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
     learned: Schema.optionalKey(Schema.Literal(true)),

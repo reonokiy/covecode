@@ -1156,6 +1156,7 @@ function ConnectionsSettingsContent({
       endpointUrl={desktopServerExposureState?.endpointUrl}
       endpoints={visibleDesktopAdvertisedEndpoints}
       defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
+      lanPeer={accessEnvironment?.serverConfig?.environment.lanPeer}
       isLoading={isLoadingDesktopAccessManagement}
       pairingLinks={pairingLinks}
       createdPairingCredentials={createdPairingCredentials}

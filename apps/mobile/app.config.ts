@@ -280,6 +280,7 @@ const config: ExpoConfig = {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
       },
+      NSBonjourServices: ["_p2p._udp"],
       NSLocalNetworkUsageDescription:
         "Allow Cove Code to connect to Cove Code servers on your local network or tailnet.",
       // Built with the iOS 27 SDK, only view controllers can hide or style the status bar.

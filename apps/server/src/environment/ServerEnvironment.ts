@@ -11,6 +11,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import { LanPeerHost } from "./LanPeerHost.ts";
 import * as Schema from "effect/Schema";
 
 import packageJson from "../../package.json" with { type: "json" };
@@ -186,6 +188,7 @@ const makeIdentity = Effect.gen(function* () {
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const lan = Option.getOrUndefined(yield* Effect.serviceOption(LanPeerHost));
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironmentIdentity;
   const hostPlatform = yield* HostProcess.Platform;
@@ -309,10 +312,14 @@ export const make = Effect.gen(function* () {
     getEnvironmentId: Effect.succeed(environmentId),
     // Publishing opt-in and relay links change at runtime; read the capability per request.
     getDescriptor: readAgentActivityPublishingActive(secrets).pipe(
-      Effect.map((agentActivityPublishing) => ({
-        ...descriptor,
-        capabilities: { ...descriptor.capabilities, agentActivityPublishing },
-      })),
+      Effect.map((agentActivityPublishing) => {
+        const lanPeer = lan?.getPeer();
+        return {
+          ...descriptor,
+          ...(lanPeer ? { lanPeer } : {}),
+          capabilities: { ...descriptor.capabilities, agentActivityPublishing },
+        };
+      }),
     ),
   });
 });

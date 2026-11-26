@@ -32,6 +32,7 @@ export {
 export {
   TunnelRegistrationUnauthorizedError,
   createEnvironmentLibp2pTunnel,
+  createLanEnvironmentTunnel,
   type EnvironmentLibp2pTunnel,
   type EnvironmentLibp2pTunnelOptions,
   type EnvironmentTunnelState,

@@ -1,4 +1,4 @@
-import { DpopProof, ManagedRelay } from "@t3tools/client-runtime/relay";
+import { DpopProof, ManagedRelay, LanPeerTransport } from "@t3tools/client-runtime/relay";
 import { RelayMobileClientId } from "@t3tools/contracts/relay";
 import * as Layer from "effect/Layer";
 
@@ -17,4 +17,8 @@ export const layer = (relayUrl: string) =>
     tunnels: environmentTunnels,
     clientId: RelayMobileClientId,
     accessTokenStore: managedRelayAccessTokenStore,
-  }).pipe(Layer.provideMerge(layerRelayDpopSigner));
+  }).pipe(
+    Layer.provideMerge(
+      Layer.merge(layerRelayDpopSigner, Layer.succeed(LanPeerTransport, environmentTunnels.lan)),
+    ),
+  );

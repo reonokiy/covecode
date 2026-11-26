@@ -1,3 +1,4 @@
+import { LanPeerTransport } from "../relay/environmentTunnel.ts";
 import { msg } from "gt-i18n";
 import { translatableDetail } from "../errors/translatable.ts";
 import { EnvironmentId } from "@t3tools/contracts";
@@ -210,6 +211,11 @@ interface EnvironmentServiceScope {
 
 /** @public */
 export const make = Effect.gen(function* () {
+  const lan = Option.getOrUndefined(yield* Effect.serviceOption(LanPeerTransport));
+  const releaseLan = (profile: ConnectionProfile | null) => {
+    if (profile?._tag === "BearerConnectionProfile" && profile.lanPeer)
+      lan?.release(profile.lanPeer.peerId);
+  };
   const registryScope = yield* Scope.Scope;
   const storage = yield* Persistence.ConnectionTargetStore;
   const registrations = yield* Persistence.ConnectionRegistrationStore;
@@ -901,6 +907,7 @@ export const make = Effect.gen(function* () {
 
     for (const route of connectionRoutes(entry)) {
       const profile = Option.getOrNull(route.profile);
+      releaseLan(profile);
       if (profile !== null && isSshConnectionProfile(profile)) {
         yield* disconnectSsh(environmentId, profile);
       }
@@ -1006,6 +1013,7 @@ export const make = Effect.gen(function* () {
         if (remaining.length === 0) return yield* removeLocked(environmentId);
         yield* replaceRoutesLocked(entry, remaining);
         const profile = Option.getOrNull(route.profile);
+        releaseLan(profile);
         if (profile !== null && isSshConnectionProfile(profile)) {
           yield* disconnectSsh(environmentId, profile);
         }
@@ -1113,6 +1121,7 @@ export const make = Effect.gen(function* () {
         if (!enabled) {
           for (const route of connectionRoutes(entry)) {
             const profile = Option.getOrNull(route.profile);
+            releaseLan(profile);
             if (profile !== null && isSshConnectionProfile(profile)) {
               yield* disconnectSsh(environmentId, profile);
             }

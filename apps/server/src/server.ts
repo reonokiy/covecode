@@ -31,6 +31,7 @@ import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as NonBlockingSpawner from "./process/NonBlockingSpawner.ts";
 import * as KeepAwake from "./background/KeepAwake.ts";
+import * as LanPeerHost from "./environment/LanPeerHost.ts";
 import * as ServerConfig from "./config.ts";
 import { withRootRequestSpans, withUntracedRequests } from "./http.ts";
 import * as ServerHttp from "./http.ts";
@@ -562,7 +563,9 @@ const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
   Layer.provide(T3ProjectFileLoader.layer),
 );
 
-const layerServerEnvironment = ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer));
+const layerServerEnvironment = ServerEnvironment.layer.pipe(
+  Layer.provide(Layer.merge(ServerSecretStore.layer, LanPeerHost.layer)),
+);
 
 const layerAuth = EnvironmentAuth.layer.pipe(
   Layer.provideMerge(layerPersistence),
@@ -1356,11 +1359,7 @@ const layerMakeServer = Layer.unwrap(
     return layerServerApplication.pipe(
       Layer.provide(CloudLink.layer.pipe(Layer.provideMerge(ConnectReachability.layer))),
       Layer.provideMerge(layerRuntimeServices),
-      Layer.provideMerge(
-        McpSessionRegistry.layer.pipe(
-          Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
-        ),
-      ),
+      Layer.provideMerge(McpSessionRegistry.layer.pipe(Layer.provide(layerServerEnvironment))),
       Layer.provide(layerActivation),
       Layer.provideMerge(
         RelayTracing.layerServerRelayBroker.pipe(Layer.provide(ManagedPolicy.layer)),

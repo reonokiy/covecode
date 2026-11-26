@@ -100,20 +100,20 @@ On a desktop host, open **Settings → Sharing & access**, enable **Network acce
 then create a pairing link using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
-For a command-line host, choose the local network in `t3 up`, or run:
+For a command-line host, enable local network access with:
 
 ```bash
-t3 up --lan
+cove up --lan
 ```
 
-For a server in a terminal, run `t3 serve --lan`. Either way, T3 Code then
+For a server in a terminal, run `cove serve --lan`. Either way, Cove Code then
 accepts connections from your local network and tailnet, so a pairing code is
 all that keeps other devices on them out.
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-t3 pair
+cove pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -121,7 +121,18 @@ in the receiving app. Connection settings are under **Settings → Environments*
 on web and desktop and **Settings → Environments** on mobile. A loopback address
 such as `127.0.0.1` reaches only the device opening the link.
 
-On a computer with the desktop app, you can open the printed `t3code://pair`
+On the same Wi-Fi, scan a LAN pairing link once in the Cove mobile app or open
+it in the desktop app. The app remembers the environment’s identity and
+reconnects over an encrypted libp2p connection without a control panel. If the
+host changes address, local network discovery finds it again. Both devices
+need access to the same multicast network for discovery. After you revoke a
+device’s session, use a new pairing link to authorize it again.
+
+A web client can refresh the connection through the original host address if
+the browser can still reach it. If that address changes, the mobile and
+desktop apps can find the host by its saved identity on the LAN.
+
+On a computer with the desktop app, you can open the printed `covecode://pair`
 app link instead. The desktop app asks you to confirm the server address, then
 adds it.
 

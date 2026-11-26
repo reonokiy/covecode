@@ -72,7 +72,7 @@ mod c {
 }
 
 #[cfg(target_os = "android")]
-mod android {
+pub(super) mod android {
     use super::*;
     use jni::{
         JNIEnv,
@@ -80,6 +80,51 @@ mod android {
         sys::jstring,
     };
     static APPLICATION: OnceLock<GlobalRef> = OnceLock::new();
+
+    pub(crate) struct MulticastLock {
+        vm: jni::JavaVM,
+        lock: GlobalRef,
+    }
+
+    impl MulticastLock {
+        pub(crate) fn acquire() -> Result<Self, Error> {
+            let context = APPLICATION.get().ok_or("Android context is unavailable")?;
+            let vm = unsafe { jni::JavaVM::from_raw(ndk_context::android_context().vm().cast()) }?;
+            let lock = {
+                let mut env = vm.attach_current_thread()?;
+                let wifi_name = env.new_string("wifi")?;
+                let manager = env
+                    .call_method(
+                        context.as_obj(),
+                        "getSystemService",
+                        "(Ljava/lang/String;)Ljava/lang/Object;",
+                        &[(&wifi_name).into()],
+                    )?
+                    .l()?;
+                let tag = env.new_string("Cove LAN discovery")?;
+                let lock = env
+                    .call_method(
+                        manager,
+                        "createMulticastLock",
+                        "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;",
+                        &[(&tag).into()],
+                    )?
+                    .l()?;
+                let lock = env.new_global_ref(lock)?;
+                env.call_method(lock.as_obj(), "acquire", "()V", &[])?;
+                lock
+            };
+            Ok(Self { vm, lock })
+        }
+    }
+
+    impl Drop for MulticastLock {
+        fn drop(&mut self) {
+            if let Ok(mut env) = self.vm.attach_current_thread() {
+                let _ = env.call_method(self.lock.as_obj(), "release", "()V", &[]);
+            }
+        }
+    }
 
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_expo_modules_covep2p_NativeTunnel_open(

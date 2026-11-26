@@ -1,5 +1,6 @@
 import type { NavigationState, PartialState } from "@react-navigation/native";
 import { CommonActions, StackActions } from "@react-navigation/native";
+import { readPairingAppLink } from "@t3tools/shared/remote";
 import { Atom } from "effect/reactivity";
 
 import { findLinkedRoute, updateLinkedRoute } from "../../lib/appLinking";
@@ -8,6 +9,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { leaveSettingsPage } from "../settings/settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
 import { pairEnvironment } from "../../state/use-remote-environment-registry";
+import { readPinnedPairingUrl } from "./pairing";
 
 export type DevAutoConnectAttempt =
   | { readonly pairingUrl: string; readonly status: "connecting" }
@@ -70,17 +72,46 @@ async function connect(pairingUrl: string) {
   });
 }
 
+const PAIRING_APP_LINK_PATH = /^(?:covecode(?:-[a-z]+)?:\/+|\/?)pair(?:[/?#]|$)/i;
+
+function isPairingAppLinkPath(value: string | undefined): boolean {
+  return value !== undefined && PAIRING_APP_LINK_PATH.test(value.trim());
+}
+
+export function readPinnedPairingAppLink(urlOrPath: string): string | null {
+  const trimmed = urlOrPath.trim();
+  if (!trimmed) return null;
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed)
+    ? trimmed
+    : `covecode://${trimmed.replace(/^\/+/, "")}`;
+  const pairingUrl = readPairingAppLink(candidate);
+  return pairingUrl ? readPinnedPairingUrl(pairingUrl) : null;
+}
+
 /**
  * `routeFor` makes a pairing an "Add route" to a saved environment, which skips the guard against
  * a pairing taking over that environment's id. Only in-app navigation may set it, never a link.
+ * `covecode://pair?pairingUrl=…` links only open the form when they carry a valid peer pin, and
+ * never forward `autoConnect` or `routeFor`.
  */
 export function withoutPairingTarget(
   state: PartialState<NavigationState> | undefined,
+  path?: string,
 ): PartialState<NavigationState> | undefined {
-  return updateLinkedRoute(state, PAIRING_FORM_ROUTES, (route) => {
-    if (route.params === undefined || !("routeFor" in route.params)) return route;
-    const { routeFor: _routeFor, ...params } = route.params as { readonly routeFor?: unknown };
-    return { ...route, params };
+  const route = findLinkedRoute(state, PAIRING_FORM_ROUTES);
+  const linkPath = path ?? route?.path;
+  if (isPairingAppLinkPath(linkPath)) {
+    const pinnedPairingUrl = linkPath ? readPinnedPairingAppLink(linkPath) : null;
+    if (pinnedPairingUrl === null || route === undefined) return undefined;
+    return updateLinkedRoute(state, PAIRING_FORM_ROUTES, (linked) => ({
+      ...linked,
+      params: { pairingUrl: pinnedPairingUrl },
+    }));
+  }
+  return updateLinkedRoute(state, PAIRING_FORM_ROUTES, (linked) => {
+    if (linked.params === undefined || !("routeFor" in linked.params)) return linked;
+    const { routeFor: _routeFor, ...params } = linked.params as { readonly routeFor?: unknown };
+    return { ...linked, params };
   });
 }
 

@@ -9,6 +9,7 @@ Pod::Spec.new do |s|
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
   s.source_files = '*.{swift,h}'
+  s.libraries = 'dns_sd'
   s.frameworks = 'Security', 'SystemConfiguration'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   s.user_target_xcconfig = { 'OTHER_LDFLAGS' => '$(inherited) "$(BUILT_PRODUCTS_DIR)/libcove_p2p.a"' }

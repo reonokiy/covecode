@@ -446,4 +446,42 @@ describe("resolveInitialServerAuthGateState", () => {
     });
     expect(testApi.calls.browserSession).toEqual([{ credential: "rejected-token" }]);
   });
+
+  it("does not redeem a peer-pinned pairing link over raw HTTP and offers its app link instead", async () => {
+    const testApi = await installAuthApi({
+      session: () => authenticatedSession(LOOPBACK_AUTH),
+      browserSession: () => Effect.succeed(browserSession(["orchestration:read"])),
+    });
+    const peerId = `12D3KooW${"A".repeat(44)}`;
+    const addr = `/ip4/192.168.1.44/tcp/4100/p2p/${peerId}`;
+    const pinnedUrl = `http://192.168.1.44:3773/pair#token=pinned-token&peer=${peerId}&addr=${encodeURIComponent(addr)}`;
+    const testWindow = installTestBrowser(pinnedUrl);
+    const {
+      peekPairingTokenFromUrl,
+      peekPinnedPairingAppLinkFromUrl,
+      resolveInitialServerAuthGateState,
+      stripPairingTokenFromUrl,
+      takePairingTokenFromUrl,
+    } = await import("./environments/primary");
+
+    expect(peekPairingTokenFromUrl()).toBeNull();
+    expect(takePairingTokenFromUrl()).toBeNull();
+    expect(peekPinnedPairingAppLinkFromUrl()).toEqual({
+      appLink: `covecode://pair?pairingUrl=${encodeURIComponent(pinnedUrl)}`,
+    });
+
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "requires-auth",
+      auth: LOOPBACK_AUTH,
+    });
+    expect(testApi.calls.browserSession).toEqual([]);
+
+    stripPairingTokenFromUrl();
+    expect(testWindow.location.hash).toBe("");
+    await expect(resolveInitialServerAuthGateState()).resolves.toEqual({
+      status: "requires-auth",
+      auth: LOOPBACK_AUTH,
+    });
+    expect(testApi.calls.browserSession).toEqual([]);
+  });
 });

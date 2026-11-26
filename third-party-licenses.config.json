@@ -322,6 +322,11 @@
       "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
     },
     {
+      "name": "@libp2p/mdns",
+      "version": "12.0.37",
+      "noticeFile": "third-party-licenses/libp2p-dependencies.txt"
+    },
+    {
       "name": "@libp2p/multistream-select",
       "version": "7.0.33",
       "noticeFile": "third-party-licenses/libp2p-dependencies.txt"

@@ -217,6 +217,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
+export const LanPeer = Schema.Struct({
+  peerId: TrimmedNonEmptyString,
+  direct: Schema.Array(TrimmedNonEmptyString),
+});
+export type LanPeer = typeof LanPeer.Type;
+
 export const ExecutionEnvironmentDescriptor = Schema.Struct({
   environmentId: EnvironmentId,
   label: TrimmedNonEmptyString,
@@ -226,6 +232,7 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   /** Highest migration this server's database holds; absent on older servers. */
   databaseMigration: Schema.optionalKey(Schema.Int),
   capabilities: ExecutionEnvironmentCapabilities,
+  lanPeer: Schema.optionalKey(LanPeer),
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
 

@@ -25,6 +25,7 @@
     "@libp2p/dcutr": "catalog:",
     "@libp2p/identify": "catalog:",
     "@libp2p/interface": "catalog:",
+    "@libp2p/mdns": "catalog:",
     "@libp2p/peer-id": "catalog:",
     "@libp2p/tcp": "catalog:",
     "@libp2p/utils": "catalog:",
@@ -32,9 +33,11 @@
     "@libp2p/websockets": "catalog:",
     "@multiformats/multiaddr": "catalog:",
     "libp2p": "catalog:",
+    "multicast-dns": "catalog:",
     "ws": "catalog:"
   },
   "devDependencies": {
+    "@types/multicast-dns": "catalog:",
     "@types/node": "catalog:",
     "@types/ws": "catalog:",
     "vite-plus": "catalog:"

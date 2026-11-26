@@ -2,6 +2,8 @@ import { msg } from "gt-i18n";
 import { detailFromError, translatableDetail } from "../errors/translatable.ts";
 import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contracts";
 import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
+import { LanPeerTransport } from "../relay/environmentTunnel.ts";
+import { openLanPeer } from "./lanPeer.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -121,9 +123,20 @@ export const preparePairingRegistration = Effect.fn(
   "clientRuntime.connection.onboarding.preparePairingRegistration",
 )(function* (input: PairingConnectionInput) {
   const target = yield* resolvePairingTarget(input);
+  const lanPlatform = Option.getOrUndefined(yield* Effect.serviceOption(LanPeerTransport));
+  const endpoint = target.lanPeer
+    ? yield* Effect.acquireRelease(
+        openLanPeer(
+          { ...target.lanPeer, discoveryBaseUrl: target.httpBaseUrl },
+          lanPlatform,
+          "pair",
+        ),
+        (tunnel) => Effect.sync(tunnel.close),
+      )
+    : target;
   const presentation = yield* ClientCapabilities.ClientPresentation;
   const descriptor = yield* fetchRemoteEnvironmentDescriptor({
-    httpBaseUrl: target.httpBaseUrl,
+    httpBaseUrl: endpoint.httpBaseUrl,
   }).pipe(Effect.mapError(mapRemoteEnvironmentError));
   // Checked before redeeming the one-time code, so a wrong link is not spent.
   if (
@@ -132,7 +145,9 @@ export const preparePairingRegistration = Effect.fn(
   ) {
     return yield* differentMachineError(descriptor.label);
   }
-  const connectionId = bearerConnectionId(descriptor.environmentId, target.httpBaseUrl);
+  const connectionId = target.lanPeer
+    ? `lan:${descriptor.environmentId}:${target.lanPeer.peerId}`
+    : bearerConnectionId(descriptor.environmentId, target.httpBaseUrl);
   const route = {
     target: new BearerConnectionTarget({
       environmentId: descriptor.environmentId,
@@ -143,6 +158,7 @@ export const preparePairingRegistration = Effect.fn(
       connectionId,
       environmentId: descriptor.environmentId,
       label: descriptor.label,
+      ...(target.lanPeer ? { lanPeer: target.lanPeer } : {}),
       httpBaseUrl: target.httpBaseUrl,
       wsBaseUrl: target.wsBaseUrl,
     }),
@@ -165,13 +181,13 @@ export const preparePairingRegistration = Effect.fn(
       ? yield* signer.value
           .createProof({
             method: "POST",
-            url: environmentEndpointUrl(target.httpBaseUrl, "/oauth/token"),
+            url: environmentEndpointUrl(endpoint.httpBaseUrl, "/oauth/token"),
           })
           .pipe(Effect.option)
       : Option.none<string>();
   if (Option.isSome(dpopProof)) {
     const access = yield* exchangeRemoteDpopAccessToken({
-      httpBaseUrl: target.httpBaseUrl,
+      httpBaseUrl: endpoint.httpBaseUrl,
       credential: target.credential,
       clientMetadata: presentation.metadata,
       dpopProof: dpopProof.value,
@@ -185,7 +201,7 @@ export const preparePairingRegistration = Effect.fn(
     });
   }
   const access = yield* bootstrapRemoteBearerSession({
-    httpBaseUrl: target.httpBaseUrl,
+    httpBaseUrl: endpoint.httpBaseUrl,
     credential: target.credential,
     clientMetadata: presentation.metadata,
   }).pipe(Effect.mapError(mapRemoteEnvironmentError));
@@ -196,7 +212,7 @@ export const preparePairingRegistration = Effect.fn(
       token: access.access_token,
     }),
   });
-});
+}, Effect.scoped);
 
 const registerPairingConnection = Effect.fn(
   "clientRuntime.connection.onboarding.registerPairingConnection",
@@ -298,6 +314,7 @@ export const prepareBearerConnectionUpdate = Effect.fn(
       connectionId,
       environmentId: options.input.environmentId,
       label,
+      ...(entry.profile.value.lanPeer ? { lanPeer: entry.profile.value.lanPeer } : {}),
       httpBaseUrl,
       wsBaseUrl: deriveWsBaseUrl(httpBaseUrl),
     }),
@@ -354,11 +371,16 @@ export const make = Effect.gen(function* () {
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
 
+  const lan = yield* Effect.serviceOption(LanPeerTransport);
+
   // Provisioning retains the delegated onboarding operation spans.
   return ConnectionOnboarding.of({
     registerPairing: Effect.fnUntraced(
       function* (input) {
-        return yield* registerPairingConnection(input);
+        const registration = registerPairingConnection(input);
+        return yield* Option.isSome(lan)
+          ? Effect.provideService(registration, LanPeerTransport, lan.value)
+          : registration;
       },
       Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
       Effect.provideService(ClientCapabilities.ClientPresentation, presentation),

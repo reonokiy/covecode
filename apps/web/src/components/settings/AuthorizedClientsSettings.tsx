@@ -28,7 +28,11 @@ import {
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
-import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
+import {
+  type PairingLanPeer,
+  resolveDesktopPairingUrl,
+  resolveHostedPairingUrl,
+} from "./pairingUrls";
 import {
   canRevokeOtherClients,
   isQrShareableEndpoint,
@@ -142,6 +146,7 @@ type PairingLinkListRowProps = {
   endpointUrl: string | null | undefined;
   endpoints: ReadonlyArray<AdvertisedEndpoint>;
   defaultEndpointKey: string | null;
+  lanPeer?: PairingLanPeer | null | undefined;
   revokingPairingLinkId: string | null;
   onRevoke: (id: string) => void;
   canRevoke: boolean;
@@ -155,6 +160,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   endpointUrl,
   endpoints,
   defaultEndpointKey,
+  lanPeer,
   revokingPairingLinkId,
   onRevoke,
   canRevoke,
@@ -168,7 +174,9 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   const [qrEndpointId, setQrEndpointId] = useState<string | null>(null);
   const qrPanelId = useId();
 
-  const currentOriginPairingUrl = credential ? resolveCurrentOriginPairingUrl(credential) : null;
+  const currentOriginPairingUrl = credential
+    ? resolveCurrentOriginPairingUrl(credential, window.location.href, lanPeer)
+    : null;
   const hostedPairingUrl =
     credential && endpointUrl != null && endpointUrl !== ""
       ? resolveHostedPairingUrl(endpointUrl, credential)
@@ -176,7 +184,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   const endpointPairingUrl = (() => {
     const endpoint = selectPairingEndpoint(endpoints, defaultEndpointKey);
     return endpoint && credential
-      ? resolveAdvertisedEndpointPairingUrl(endpoint, credential)
+      ? resolveAdvertisedEndpointPairingUrl(endpoint, credential, lanPeer)
       : null;
   })();
   const endpointCopyOptions = (() => {
@@ -193,7 +201,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
       if (endpoint.status === "unavailable") {
         continue;
       }
-      const url = resolveAdvertisedEndpointPairingUrl(endpoint, credential);
+      const url = resolveAdvertisedEndpointPairingUrl(endpoint, credential, lanPeer);
       options.push({
         id: endpoint.id,
         preferenceKey: endpointDefaultPreferenceKey(endpoint),
@@ -208,7 +216,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   const shareablePairingUrl =
     endpointPairingUrl ??
     (credential && endpointUrl != null && endpointUrl !== ""
-      ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, credential))
+      ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, credential, lanPeer))
       : servedByEnvironment
         ? currentOriginPairingUrl
         : null);
@@ -851,6 +859,7 @@ type PairingClientsListProps = {
   endpointUrl: string | null | undefined;
   endpoints: ReadonlyArray<AdvertisedEndpoint>;
   defaultEndpointKey: string | null;
+  lanPeer?: PairingLanPeer | null | undefined;
   isLoading: boolean;
   pairingLinks: ReadonlyArray<ServerPairingLinkRecord>;
   createdPairingCredentials: ReadonlyMap<string, string>;
@@ -868,6 +877,7 @@ export const PairingClientsList = memo(function PairingClientsList({
   endpointUrl,
   endpoints,
   defaultEndpointKey,
+  lanPeer,
   isLoading,
   pairingLinks,
   createdPairingCredentials,
@@ -891,6 +901,7 @@ export const PairingClientsList = memo(function PairingClientsList({
           endpointUrl={endpointUrl}
           endpoints={endpoints}
           defaultEndpointKey={defaultEndpointKey}
+          lanPeer={lanPeer}
           revokingPairingLinkId={revokingPairingLinkId}
           onRevoke={onRevokePairingLink}
           canRevoke={canRevoke}

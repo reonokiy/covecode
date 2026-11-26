@@ -15,7 +15,10 @@ import * as Schema from "effect/Schema";
 import { HttpClientError } from "effect/http";
 
 import {
+  buildPairingAppLink,
   getPairingTokenFromUrl,
+  readHashParams,
+  resolveRemotePairingTarget,
   stripPairingTokenFromUrl as stripPairingTokenUrl,
 } from "@t3tools/shared/remote";
 
@@ -149,13 +152,48 @@ let explicitPairingRequested = false;
 const AUTH_SESSION_ESTABLISH_TIMEOUT_MS = 2_000;
 const AUTH_SESSION_ESTABLISH_STEP_MS = 100;
 
+function hasPinnedPeerInUrl(url: URL = new URL(window.location.href)): boolean {
+  const hashParams = readHashParams(url);
+  return hashParams.has("peer") || hashParams.has("addr");
+}
+
+export function peekPinnedPairingAppLinkFromUrl(
+  href: string = window.location.href,
+): { readonly appLink: string | null; readonly errorMessage?: string } | null {
+  const url = new URL(href);
+  if (!hasPinnedPeerInUrl(url)) {
+    return null;
+  }
+  try {
+    resolveRemotePairingTarget({ pairingUrl: url.toString() });
+    return {
+      appLink: buildPairingAppLink(url.toString()),
+    };
+  } catch (error) {
+    return {
+      appLink: null,
+      errorMessage: thrownErrorMessage(error, m) ?? m(msg("Authentication failed.")),
+    };
+  }
+}
+
 export function peekPairingTokenFromUrl(): string | null {
-  return getPairingTokenFromUrl(new URL(window.location.href));
+  const url = new URL(window.location.href);
+  if (hasPinnedPeerInUrl(url)) {
+    return null;
+  }
+  return getPairingTokenFromUrl(url);
 }
 
 export function stripPairingTokenFromUrl() {
   const url = new URL(window.location.href);
   const next = stripPairingTokenUrl(url);
+  const hashParams = readHashParams(next);
+  if (hashParams.has("peer") || hashParams.has("addr")) {
+    hashParams.delete("peer");
+    hashParams.delete("addr");
+    next.hash = hashParams.toString();
+  }
   if (next.toString() === url.toString()) {
     return;
   }
@@ -364,7 +402,7 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
   // Preserve explicit grant replacement across the auth-gate reload triggered by token removal.
   if (window.location.pathname.replace(/\/+$/, "") !== "/pair") {
     explicitPairingRequested = false;
-  } else if (peekPairingTokenFromUrl()) {
+  } else if (peekPairingTokenFromUrl() || hasPinnedPeerInUrl()) {
     explicitPairingRequested = true;
   }
   if (explicitPairingRequested) {

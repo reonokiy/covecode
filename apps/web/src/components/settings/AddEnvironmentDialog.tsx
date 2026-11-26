@@ -121,6 +121,7 @@ export function AddEnvironmentDialog({
   const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
+  const [savedBackendPairingUrl, setSavedBackendPairingUrl] = useState<string | null>(null);
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
   const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
@@ -163,6 +164,7 @@ export function AddEnvironmentDialog({
       setSavedBackendMode("remote");
       setSavedBackendHost("");
       setSavedBackendPairingCode("");
+      setSavedBackendPairingUrl(null);
       setSavedBackendSshHost("");
       setSavedBackendSshUsername("");
       setSavedBackendSshPort("");
@@ -225,6 +227,7 @@ export function AddEnvironmentDialog({
       remotePairingInput = parseRemotePairingFields({
         host: savedBackendHost,
         pairingCode: savedBackendPairingCode,
+        pairingUrl: savedBackendPairingUrl,
       });
     } catch (error) {
       const message =
@@ -363,11 +366,24 @@ export function AddEnvironmentDialog({
   const handleSavedBackendHostChange = (value: string) => {
     const parsedPairingUrl = parsePairingUrlFields(value);
     if (parsedPairingUrl) {
+      setSavedBackendPairingUrl(parsedPairingUrl.pairingUrl);
       setSavedBackendHost(parsedPairingUrl.host);
       setSavedBackendPairingCode(parsedPairingUrl.pairingCode);
       return;
     }
+    setSavedBackendPairingUrl(null);
     setSavedBackendHost(value);
+  };
+
+  const handleSavedBackendPairingCodeChange = (value: string) => {
+    const parsedPairingUrl = parsePairingUrlFields(value);
+    if (parsedPairingUrl) {
+      setSavedBackendPairingUrl(parsedPairingUrl.pairingUrl);
+      setSavedBackendHost(parsedPairingUrl.host);
+      setSavedBackendPairingCode(parsedPairingUrl.pairingCode);
+      return;
+    }
+    setSavedBackendPairingCode(value);
   };
   const renderConnectionModeCard = (input: {
     readonly mode: "remote" | "ssh";
@@ -433,7 +449,7 @@ export function AddEnvironmentDialog({
           </span>
           <Input
             value={savedBackendPairingCode}
-            onChange={(event) => setSavedBackendPairingCode(event.target.value)}
+            onChange={(event) => handleSavedBackendPairingCodeChange(event.target.value)}
             placeholder={gt("PAIRCODE")}
             disabled={isAddingSavedBackend}
             spellCheck={false}

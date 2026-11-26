@@ -605,7 +605,11 @@ export const pairCommand = Command.make("pair", {
         ttl: flags.ttl,
         label: flags.label,
       });
-      const pairingUrl = buildPairingUrl(pairingBaseUrl, issued.credential);
+      const pairingUrl = buildPairingUrl(
+        pairingBaseUrl,
+        issued.credential,
+        flags.tailscale ? undefined : target.descriptor.lanPeer,
+      );
 
       yield* Console.log(
         formatPairOutput({

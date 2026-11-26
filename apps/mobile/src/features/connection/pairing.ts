@@ -1,10 +1,12 @@
-import { readHostedPairingRequest } from "@t3tools/shared/remote";
+import {
+  readHostedPairingRequest,
+  readPairingAppLink,
+  resolveRemotePairingTarget,
+} from "@t3tools/shared/remote";
 import * as Schema from "effect/Schema";
 import { msg } from "gt-react-native";
 
 import { m } from "../../i18n/messages";
-
-const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
 
 function isIpLiteral(host: string): boolean {
   try {
@@ -21,6 +23,45 @@ function isIpLiteral(host: string): boolean {
   }
 }
 
+function unwrapMobilePairingLink(rawValue: string): string {
+  const trimmed = rawValue.trim();
+  if (!trimmed) return "";
+  return readPairingAppLink(trimmed) ?? trimmed;
+}
+
+export function readPinnedPairingUrl(rawValue: string | undefined): string | null {
+  const trimmed = rawValue?.trim() ?? "";
+  if (!trimmed) return null;
+  const pairingUrl = unwrapMobilePairingLink(trimmed);
+  try {
+    return resolveRemotePairingTarget({ pairingUrl }).lanPeer ? pairingUrl : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveRoutePairingUrl(rawValue: string | undefined): string {
+  const pinned = readPinnedPairingUrl(rawValue);
+  if (pinned !== null) return pinned;
+  if (!__DEV__) return "";
+  return unwrapMobilePairingLink(rawValue ?? "");
+}
+
+function setTokenPreservingFragment(url: URL, token: string): string {
+  url.searchParams.delete("token");
+  const existingHashParams = new URLSearchParams(
+    url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
+  );
+  const nextHashParams = new URLSearchParams([["token", token]]);
+  for (const [key, value] of existingHashParams) {
+    if (key !== "token") {
+      nextHashParams.append(key, value);
+    }
+  }
+  url.hash = nextHashParams.toString();
+  return url.toString();
+}
+
 export class PairingQrPayloadEmptyError extends Schema.TaggedError<PairingQrPayloadEmptyError>()(
   "PairingQrPayloadEmptyError",
   {},
@@ -30,23 +71,33 @@ export class PairingQrPayloadEmptyError extends Schema.TaggedError<PairingQrPayl
   }
 }
 
-export function buildPairingUrl(host: string, code: string): string {
-  const h = host.trim();
+export function buildPairingUrl(host: string, code: string, sourcePairingUrl?: string): string {
+  const h = unwrapMobilePairingLink(host);
   const c = code.trim();
   if (!h) return "";
   if (!c) return h;
 
   try {
     const url = new URL(h.includes("://") ? h : `${isIpLiteral(h) ? "http" : "https"}://${h}`);
-    url.hash = new URLSearchParams([["token", c]]).toString();
-    return url.toString();
+    const unwrappedSource = sourcePairingUrl ? unwrapMobilePairingLink(sourcePairingUrl) : "";
+    if (unwrappedSource) {
+      try {
+        const sourceUrl = new URL(unwrappedSource);
+        const parsedHost = parsePairingUrl(url.toString()).host;
+        const parsedSource = parsePairingUrl(sourceUrl.toString());
+        if (parsedSource.host && parsedSource.host === parsedHost) {
+          return setTokenPreservingFragment(sourceUrl, c);
+        }
+      } catch {}
+    }
+    return setTokenPreservingFragment(url, c);
   } catch {
     return `${h}#token=${c}`;
   }
 }
 
 export function parsePairingUrl(url: string): { host: string; code: string } {
-  const trimmed = url.trim();
+  const trimmed = unwrapMobilePairingLink(url);
   if (!trimmed) return { host: "", code: "" };
 
   try {
@@ -74,20 +125,9 @@ export function parsePairingUrl(url: string): { host: string; code: string } {
 }
 
 export function extractPairingUrlFromQrPayload(payload: string): string {
-  const trimmed = payload.trim();
-  if (!trimmed) {
+  const unwrapped = unwrapMobilePairingLink(payload);
+  if (!unwrapped) {
     throw new PairingQrPayloadEmptyError({});
   }
-
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol === "t3code:") {
-      const pairingUrl = url.searchParams.get(MOBILE_PAIRING_URL_PARAM)?.trim() ?? "";
-      if (pairingUrl.length > 0) {
-        return pairingUrl;
-      }
-    }
-  } catch {}
-
-  return trimmed;
+  return unwrapped;
 }

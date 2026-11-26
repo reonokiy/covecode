@@ -1,3 +1,5 @@
+import { LanPeerTransport } from "../relay/environmentTunnel.ts";
+import { openLanPeer } from "./lanPeer.ts";
 import { msg } from "gt-i18n";
 import { translatableDetail } from "../errors/translatable.ts";
 import type {
@@ -125,6 +127,7 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
 });
 
 const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")(function* () {
+  const lan = Option.getOrUndefined(yield* Effect.serviceOption(LanPeerTransport));
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
   const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
 
@@ -166,18 +169,25 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         }),
       ),
     );
+    const endpoint = profile.lanPeer
+      ? yield* openLanPeer(
+          { ...profile.lanPeer, discoveryBaseUrl: profile.httpBaseUrl },
+          lan,
+          "reconnect",
+        )
+      : profile;
     const authorized =
       credential._tag === "DpopConnectionCredential"
         ? yield* remote.authorizeDirectDpop({
             expectedEnvironmentId: target.environmentId,
             connectionId: credentialConnectionId(target.connectionId),
-            httpBaseUrl: profile.httpBaseUrl,
-            wsBaseUrl: profile.wsBaseUrl,
+            httpBaseUrl: endpoint.httpBaseUrl,
+            wsBaseUrl: endpoint.wsBaseUrl,
           })
         : yield* remote.authorizeBearer({
             expectedEnvironmentId: target.environmentId,
-            httpBaseUrl: profile.httpBaseUrl,
-            wsBaseUrl: profile.wsBaseUrl,
+            httpBaseUrl: endpoint.httpBaseUrl,
+            wsBaseUrl: endpoint.wsBaseUrl,
             bearerToken: credential.token,
             connectionMethod: "direct",
           });

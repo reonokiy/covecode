@@ -1,5 +1,6 @@
 export {
   peekPairingTokenFromUrl,
+  peekPinnedPairingAppLinkFromUrl,
   PrimaryEnvironmentPairingCredentialRejectedError,
   PrimaryEnvironmentRequestError,
   resolveInitialServerAuthGateState,

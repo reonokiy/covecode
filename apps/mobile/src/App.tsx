@@ -125,13 +125,14 @@ const linkingConfig = {
 } as const;
 
 function getAppStateFromPath(path: string, options: Parameters<typeof getStateFromPath>[1]) {
+  const normalizedPath = path.replace(/^covecode(?:-[a-z]+)?:\/+/i, "");
   return pipe(
-    getStateFromPath(path, options),
-    (state) => restoreDraftLinkState(state, path),
+    getStateFromPath(normalizedPath, options),
+    (state) => restoreDraftLinkState(state, normalizedPath),
     (state) => restoreSettingsLinkState(state, settingsLinkPage()),
     takeThreadPromptLink,
     takeNewTaskPromptLink,
-    withoutPairingTarget,
+    (state) => withoutPairingTarget(state, path),
     startDevAutoConnect,
     takeScheduledTaskNewLink,
   );
