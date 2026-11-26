@@ -3,7 +3,7 @@ Pod::Spec.new do |s|
   s.version = '0.1.0'
   s.summary = 'Encrypted Cove environment transport.'
   s.author = 'Cove Code'
-  s.homepage = 'https://github.com/reonokiy/t3code'
+  s.homepage = 'https://github.com/reonokiy/covecode'
   s.source = { :path => '.' }
   s.platform = :ios, '18.0'
   s.static_framework = true

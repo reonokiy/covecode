@@ -1,0 +1,188 @@
+name: Release Cove Code
+
+on:
+  push:
+    tags: ["v[0-9]*.[0-9]*.[0-9]*"]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: cove-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    if: github.repository == 'reonokiy/covecode'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - id: version
+        name: Verify stable release tag
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git merge-base --is-ancestor HEAD origin/covecode
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-ci-deps
+      - run: node scripts/update-release-package-versions.ts "${GITHUB_REF_NAME#v}"
+      - run: vp run build:desktop:bundle
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: js-bundle
+          path: |
+            apps/server/dist
+            apps/desktop/dist-electron
+          if-no-files-found: error
+      - run: tar -czf "cove-web-${GITHUB_REF_NAME#v}.tar.gz" -C apps/server/dist/client .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: web
+          path: cove-web-*.tar.gz
+          if-no-files-found: error
+
+  desktop:
+    needs: bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {
+              label: Linux x64,
+              runner: ubuntu-24.04,
+              platform: linux,
+              target: AppImage,
+              arch: x64,
+              rust: x86_64-unknown-linux-gnu,
+              resource: linux-x64,
+            }
+          - {
+              label: Linux arm64,
+              runner: ubuntu-24.04-arm,
+              platform: linux,
+              target: AppImage,
+              arch: arm64,
+              rust: aarch64-unknown-linux-gnu,
+              resource: linux-arm64,
+            }
+          - {
+              label: macOS arm64,
+              runner: macos-26,
+              platform: mac,
+              target: dmg,
+              arch: arm64,
+              rust: aarch64-apple-darwin,
+              resource: darwin-arm64,
+            }
+          - {
+              label: macOS x64,
+              runner: macos-26,
+              platform: mac,
+              target: dmg,
+              arch: x64,
+              rust: x86_64-apple-darwin,
+              resource: darwin-x64,
+            }
+          - {
+              label: Windows x64,
+              runner: ubuntu-24.04,
+              platform: win,
+              target: nsis,
+              arch: x64,
+              rust: x86_64-pc-windows-msvc,
+              resource: win32-x64,
+              verify: windows-2025,
+            }
+          - {
+              label: Windows arm64,
+              runner: ubuntu-24.04,
+              platform: win,
+              target: nsis,
+              arch: arm64,
+              rust: aarch64-pc-windows-msvc,
+              resource: win32-arm64,
+              verify: windows-11-arm,
+            }
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      label: ${{ matrix.label }}
+      runner: ${{ matrix.runner }}
+      platform: ${{ matrix.platform }}
+      target: ${{ matrix.target }}
+      arch: ${{ matrix.arch }}
+      rust_target: ${{ matrix.rust }}
+      resource_key: ${{ matrix.resource }}
+      verify_runner: ${{ matrix.verify || '' }}
+      cli_archive: ${{ matrix.resource != 'darwin-x64' }}
+      version: ${{ needs.bundle.outputs.version }}
+      ref: ${{ github.sha }}
+      release_channel: stable
+      relay_client_tracing: false
+      relay_url: ""
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+
+  publish:
+    needs: [bundle, desktop]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: cli-*
+          path: release-assets
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: web
+          path: release-assets
+      - name: Prepare downloads
+        run: |
+          node scripts/merge-release-update-manifests.ts release-assets
+          cd release-assets
+          rm -f builder-debug.yml
+          sha256sum cove-*.tar.gz cove-*.zip > SHA256SUMS
+      - name: Publish the control panel image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ghcr.io/reonokiy/cove-cp
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -f infra/cp/Dockerfile --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" -t "$IMAGE:$GITHUB_REF_NAME" .
+          docker push "$IMAGE:$GITHUB_REF_NAME"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Cove Code ${GITHUB_REF_NAME#v}" --generate-notes
+          fi
+          [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == true ]]
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false

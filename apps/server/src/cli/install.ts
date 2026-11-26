@@ -54,8 +54,8 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const windows = platform === "win32";
   if (Option.isNone(runtime)) {
     const script = windows
-      ? "irm https://raw.githubusercontent.com/reonokiy/t3code/covecode/scripts/install.ps1 | iex"
-      : "curl -fsSL https://raw.githubusercontent.com/reonokiy/t3code/covecode/scripts/install.sh | sh";
+      ? "irm https://raw.githubusercontent.com/reonokiy/covecode/covecode/scripts/install.ps1 | iex"
+      : "curl -fsSL https://raw.githubusercontent.com/reonokiy/covecode/covecode/scripts/install.sh | sh";
     return yield* new CliInstallError({
       reason: `Only the standalone cove CLI can install itself. Use \`${script}\`, or Settings in the desktop app.`,
     });

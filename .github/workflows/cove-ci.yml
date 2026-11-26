@@ -1,0 +1,35 @@
+name: Cove CI
+
+on:
+  push:
+    branches: [covecode]
+  pull_request:
+    branches: [covecode]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cove-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - uses: ./.github/actions/setup-ci-deps
+      - run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Check changed files
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ "$BASE" =~ ^0+$ ]]; then BASE=HEAD^; fi
+          git rev-parse --verify "$BASE^{commit}" || git fetch --no-tags --depth=1 origin "$BASE"
+          vp run check:changed "$BASE"

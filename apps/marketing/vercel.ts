@@ -36,13 +36,13 @@ export const config: VercelConfig = {
     {
       source: "/mobile",
       has: [{ type: "header", key: "user-agent", value: ".*(iPhone|iPad|iPod).*" }],
-      destination: "https://github.com/reonokiy/t3code/releases",
+      destination: "https://github.com/reonokiy/covecode/releases",
       permanent: false,
     },
     {
       source: "/mobile",
       has: [{ type: "header", key: "user-agent", value: ".*Android.*" }],
-      destination: "https://github.com/reonokiy/t3code/releases",
+      destination: "https://github.com/reonokiy/covecode/releases",
       permanent: false,
     },
     {

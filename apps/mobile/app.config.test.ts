@@ -6,7 +6,11 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () => ({
+    APP_VARIANT: process.env.APP_VARIANT,
+    COVE_APPLE_TEAM_ID: process.env.COVE_APPLE_TEAM_ID,
+    COVE_EAS_PROJECT_ID: process.env.COVE_EAS_PROJECT_ID,
+  }),
 }));
 
 afterEach(() => {
@@ -31,6 +35,7 @@ it.each([
   ["preview", "net.nokiy.cove.preview"],
   ["production", "net.nokiy.cove"],
 ])("keeps the iOS and Android identifiers for APP_VARIANT=%j", async (value, identifier) => {
+  vi.stubEnv("COVE_APPLE_TEAM_ID", "ARK85ZXQ4Z");
   const config = await loadConfig(value);
   expect(config.ios?.bundleIdentifier).toBe(identifier);
   expect(config.android?.package).toBe(identifier);
@@ -44,4 +49,17 @@ it.each([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
+});
+
+it("uses only the configured Cove project for OTA updates", async () => {
+  vi.stubEnv("COVE_EAS_PROJECT_ID", "");
+  vi.stubEnv("COVE_APPLE_TEAM_ID", "");
+  const standalone = await loadConfig("production");
+  expect(standalone.updates?.enabled).toBe(false);
+  expect(standalone.updates?.url).toBeUndefined();
+  expect(standalone.ios?.appleTeamId).toBeUndefined();
+  vi.stubEnv("COVE_EAS_PROJECT_ID", "cove-project");
+  const linked = await loadConfig("production");
+  expect(linked.extra?.eas.projectId).toBe("cove-project");
+  expect(linked.updates?.url).toBe("https://u.expo.dev/cove-project");
 });

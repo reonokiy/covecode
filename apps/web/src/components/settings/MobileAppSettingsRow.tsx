@@ -11,13 +11,13 @@ const stores = [
   {
     label: msg("iPhone and iPad"),
     store: "Releases",
-    url: "https://github.com/reonokiy/t3code/releases",
+    url: "https://github.com/reonokiy/covecode/releases",
     Icon: AppleIcon,
   },
   {
     label: "Android",
     store: "Releases",
-    url: "https://github.com/reonokiy/t3code/releases",
+    url: "https://github.com/reonokiy/covecode/releases",
     Icon: AndroidIcon,
   },
 ];

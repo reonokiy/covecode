@@ -14,6 +14,12 @@ Cove Code runs the coding agents on your machine and gives them one fast, securi
 
 It works with Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code, fx, and any [ACP](./docs/user/providers-acp.md) agent.
 
+## Releases
+
+[Download Cove Code](https://github.com/reonokiy/covecode/releases) for desktop, the standalone CLI, or the web client. The matching Linux x64 control panel image is published as `ghcr.io/reonokiy/cove-cp:vX.Y.Z`.
+
+Cove CI checks pushes and pull requests to `covecode`. To publish a stable release, push a new `vX.Y.Z` tag on a commit from that branch. GitHub Actions builds the platform archives, assembles the updater manifests and checksums, and publishes them in this repository.
+
 ## Development
 
 ```bash

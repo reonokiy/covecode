@@ -51,7 +51,7 @@ export function runServicePreflight(input: {
       // reinstall itself and report success, so name the exact install and the path check.
       reason: [
         `The installed service launcher speaks protocol ${launcherProtocol}, but cove@${version} requires protocol ${SERVICE_LAUNCHER_PROTOCOL}.`,
-        `On the server machine, install this exact CLI: \`curl -fsSL https://raw.githubusercontent.com/reonokiy/t3code/covecode/scripts/install.sh | T3CODE_VERSION=${version} sh\`.`,
+        `On the server machine, install this exact CLI: \`curl -fsSL https://raw.githubusercontent.com/reonokiy/covecode/covecode/scripts/install.sh | T3CODE_VERSION=${version} sh\`.`,
         `Check that \`cove --version\` prints ${version} and that \`which -a cove\` lists no older cove (such as an npm or nvm install) first, then run \`~/.local/bin/cove service install\` (the installer's default path).`,
         "Updating the desktop app does not update this CLI, and `cove service update` only repairs the service with whichever CLI runs it.",
       ].join(" "),
