@@ -1,11 +1,4 @@
-export const browserTunnelHost = /^[a-f0-9]{32}\.cove\.invalid$/u;
-
-const browserAssets = new Map<string, (path: string) => string>();
-
-export function registerBrowserTunnelAssets(host: string, resolve: (path: string) => string) {
-  browserAssets.set(host, resolve);
-  return () => browserAssets.delete(host);
-}
+import { browserTunnelHost, peerResourceUrl } from "./transport.ts";
 
 // The prefix authenticates the local transport. The environment receives and verifies the remaining path.
 export function tunnelResourceUrl(value: string): URL | null {
@@ -30,7 +23,9 @@ export function tunnelResourceUrl(value: string): URL | null {
 export function resolveTunnelResource(base: string, path: string): string | null {
   if (!tunnelResourceUrl(base) || !path.startsWith("/") || path.startsWith("//")) return null;
   const url = new URL(base);
-  const resolve = browserAssets.get(url.hostname);
-  if (resolve && path.startsWith("/api/assets/")) return resolve(path);
+  if (path.startsWith("/api/assets/")) {
+    const resource = peerResourceUrl(url.hostname, path);
+    if (resource) return resource;
+  }
   return url.href.replace(/\/$/u, "") + path;
 }

@@ -2,7 +2,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeHttp from "node:http";
-import type * as NodeNet from "node:net";
+import * as NodeNet from "node:net";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
@@ -13,6 +13,9 @@ import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { WebSocket, WebSocketServer } from "ws";
+import { COVE_TUNNEL_PROTOCOL, pipeStreamAndSocket } from "./protocols.ts";
+import { openDesktopStream, openEnvironmentPeer } from "./desktopStream.ts";
+import { browserWire, peerHttpClient } from "./peerHttpClient.ts";
 import { serveBrowserStream } from "./browserBridge.ts";
 import { BROWSER_TUNNEL_PROTOCOL } from "./browserProtocol.ts";
 
@@ -26,6 +29,7 @@ import {
 } from "./index.ts";
 
 interface OriginFixture {
+  readonly server: NodeHttp.Server;
   readonly port: number;
   readonly close: () => Promise<void>;
 }
@@ -35,12 +39,21 @@ async function startOriginFixture(): Promise<OriginFixture> {
   wss.on("connection", (ws, req) => {
     ws.send(JSON.stringify({ type: "welcome", url: req.url ?? "/" }));
     ws.on("message", (data, isBinary) => {
-      const text = isBinary ? Buffer.from(data as Buffer).toString("utf8") : String(data);
-      ws.send(`echo:${text}`);
+      if (isBinary) ws.send(data, { binary: true });
+      else ws.send(`echo:${String(data)}`);
     });
   });
 
   const server = NodeHttp.createServer(async (req, res) => {
+    if (req.url === "/reject") {
+      res.writeHead(413).end("Too large");
+      return;
+    }
+    if (req.url === "/events") {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("data: ready\n\n");
+      return;
+    }
     if (req.url === "/healthz") {
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
@@ -91,6 +104,7 @@ async function startOriginFixture(): Promise<OriginFixture> {
 
   const address = server.address() as NodeNet.AddressInfo;
   return {
+    server,
     port: address.port,
     close: async () => {
       for (const client of wss.clients) {
@@ -159,9 +173,10 @@ describe("libp2p-tunnel", () => {
     cleanups.push(origin.close);
     const config = {
       bindHost: "127.0.0.1",
-      localPort: origin.port,
+      server: origin.server,
       keyPath: NodePath.join(home, "lan.key"),
     };
+    await new Promise<void>((resolve) => origin.server.close(() => resolve()));
     const first = await createLanEnvironmentTunnel(config);
     const paired = first.getPeer();
     await first.stop();
@@ -357,9 +372,14 @@ describe("libp2p-tunnel", () => {
     expect(wsMessages[1]).toBe("echo:ping-from-client");
   });
 
-  it.each([false, true])(
-    "streams browser HTTP and WebSocket with direct connectivity %s",
-    async (direct) => {
+  it.each([
+    ["browser", false],
+    ["browser", true],
+    ["desktop", false],
+    ["desktop", true],
+  ] as const)(
+    "streams %s HTTP and WebSocket with direct connectivity %s",
+    async (client, direct) => {
       const origin = await startOriginFixture();
       cleanups.push(origin.close);
       const relay = await createRelayLibp2pNode({
@@ -372,25 +392,57 @@ describe("libp2p-tunnel", () => {
         endpointKey: "browser",
         connectorToken: "test",
         relayMultiaddrs: relay.getMultiaddrs(),
-        localHost: "127.0.0.1",
-        localPort: origin.port,
+        server: origin.server,
         enableP2p: direct,
       });
       cleanups.push(tunnel.stop);
       await tunnel.waitForRelayReservation(10_000);
-      const { openBrowserTunnel } = await import("./browser.ts");
-      const browser = await openBrowserTunnel({
-        peerId: tunnel.peerId,
-        direct: [],
-        relays: relay.getMultiaddrs(),
-      });
-      expect(browser.getActiveTransport()).toBe(direct ? "direct" : "relay");
-      cleanups.push(async () => {
-        await browser.close();
-      });
+      const relayAddresses = relay.getMultiaddrs();
+      const directAddresses = relay.getEndpointRegistration("browser")!.directMultiaddrs;
+      const expectedTransport = direct ? "direct" : "relay";
+      const openClient = async () => {
+        if (client === "browser") {
+          const { openBrowserTunnel } = await import("./browser.ts");
+          const peer = await openBrowserTunnel({
+            peerId: tunnel.peerId,
+            direct: [],
+            relays: relayAddresses,
+          });
+          cleanups.push(peer.close);
+          expect(peer.getActiveTransport()).toBe(expectedTransport);
+          return peer;
+        }
+        const peer = await openEnvironmentPeer({
+          targetPeerId: tunnel.peerId,
+          directMultiaddrs: directAddresses,
+          relayMultiaddrs: relayAddresses,
+          mode: direct ? "p2p" : "relay",
+        });
+        cleanups.push(peer.stop);
+        expect(await peer.connect()).toBe(expectedTransport);
+        const negotiated = await peer.openStream();
+        expect(negotiated.protocol).toBe("/http/1.1");
+        await negotiated.close();
+        return peerHttpClient(async (signal) => {
+          const stream = openDesktopStream(peer);
+          return browserWire({
+            signal,
+            async read() {
+              const message = await stream.read();
+              if (!message) throw new Error("Desktop stream closed");
+              return message;
+            },
+            write: (type, data = new Uint8Array()) => stream.write({ type, data }),
+            close: async () => stream.dispose(),
+            abort: stream.dispose,
+          });
+        });
+      };
+      const http = await openClient();
+      await new Promise<void>((resolve) => origin.server.close(() => resolve()));
       let sent = 0;
-      const payload = JSON.stringify({ text: "hello" });
-      const res = await browser.fetch(
+      const payload = JSON.stringify({ text: "hello".repeat(32_768) });
+      const res = await http.fetch(
         new Request("https://client.invalid/echo?q=1", {
           method: "POST",
           headers: { "x-cove-test": "encrypted" },
@@ -405,9 +457,31 @@ describe("libp2p-tunnel", () => {
       expect(await res.json()).toEqual({
         url: "/echo?q=1",
         customHeader: "encrypted",
-        body: { text: "hello" },
+        body: JSON.parse(payload),
       });
-      const socket = browser.socket(new URL("wss://client.invalid/ws?test=browser"), ["cove-test"]);
+      const uploadCancelled = Promise.withResolvers<void>();
+      const options = {
+        method: "POST",
+        duplex: "half",
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(Uint8Array.of(1));
+          },
+          cancel: uploadCancelled.resolve,
+        }),
+      };
+      const rejected = await http.fetch(new Request("https://client.invalid/reject", options));
+      expect(rejected.status).toBe(413);
+      expect(await rejected.text()).toBe("Too large");
+      await uploadCancelled.promise;
+      const cancelled = Promise.withResolvers<void>();
+      origin.server.once("request", (_req, res) => res.once("close", cancelled.resolve));
+      const events = await http.fetch(new Request("https://client.invalid/events"));
+      const reader = events.body!.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: ready\n\n");
+      await reader.cancel();
+      await cancelled.promise;
+      const socket = http.socket(new URL("wss://client.invalid/ws?test=browser"), ["cove-test"]);
       const reply = await new Promise<string>((resolve, reject) => {
         socket.onerror = () => reject(new Error("Browser socket failed"));
         socket.onmessage = ({ data }) => {
@@ -415,13 +489,21 @@ describe("libp2p-tunnel", () => {
           else socket.send("ping");
         };
       });
+      expect(socket.transport).toBe(expectedTransport);
       expect(socket.protocol).toBe("cove-test");
       expect(reply).toBe("echo:ping");
+      socket.binaryType = "arraybuffer";
+      const echoed = Promise.withResolvers<ArrayBuffer>();
+      socket.onmessage = ({ data }) => echoed.resolve(data);
+      const binary = Uint8Array.of(0, 255, 16, 128);
+      socket.send(binary);
+      expect(new Uint8Array(await echoed.promise)).toEqual(binary);
       const closed = new Promise<CloseEvent>((resolve) => {
         socket.onclose = resolve;
       });
       socket.close(4001, "finished");
       expect(await closed).toMatchObject({ code: 4001, reason: "finished", wasClean: true });
+      expect(socket.transport).toBe("disconnected");
     },
   );
 
@@ -436,7 +518,7 @@ describe("libp2p-tunnel", () => {
     });
     cleanups.push(async () => environment.stop());
     await environment.handle(BROWSER_TUNNEL_PROTOCOL, (stream) =>
-      serveBrowserStream(stream, "127.0.0.1", origin.port),
+      serveBrowserStream(stream, () => NodeNet.connect(origin.port, "127.0.0.1")),
     );
 
     const { openBrowserTunnel } = await import("./browser.ts");
@@ -449,6 +531,61 @@ describe("libp2p-tunnel", () => {
     expect(browser.getActiveTransport()).toBe("direct");
     const response = await browser.fetch(new Request("https://client.invalid/healthz"));
     expect(await response.json()).toMatchObject({ ok: true, path: "/healthz" });
+  });
+
+  it("lets one waiter cancel while another connects to the same peer using refreshed LAN hints", async () => {
+    const host = await createLibp2p({
+      addresses: { listen: ["/ip4/127.0.0.1/tcp/0/ws"] },
+      transports: [webSockets()],
+      connectionEncrypters: [noise()],
+      streamMuxers: [yamux()],
+    });
+    cleanups.push(async () => host.stop());
+    await host.handle(COVE_TUNNEL_PROTOCOL, async (stream) => {
+      await stream.close();
+    });
+    const peer = await openEnvironmentPeer({
+      targetPeerId: host.peerId.toString(),
+      relayMultiaddrs: [],
+    });
+    cleanups.push(peer.stop);
+    const abort = new AbortController();
+    const abandoned = peer.openStream(abort.signal);
+    const remaining = peer.openStream();
+    abort.abort(new Error("Stop waiting"));
+    await expect(abandoned).rejects.toThrow("Stop waiting");
+    peer.updateAddresses({ direct: host.getMultiaddrs().map(String), relays: [] });
+    await (await remaining).close();
+  });
+
+  it("negotiates HTTP with an environment advertising the previous tunnel protocol", async () => {
+    const origin = await startOriginFixture();
+    cleanups.push(origin.close);
+    const host = await createLibp2p({
+      addresses: { listen: ["/ip4/127.0.0.1/tcp/0/ws"] },
+      transports: [webSockets()],
+      connectionEncrypters: [noise()],
+      streamMuxers: [yamux()],
+    });
+    cleanups.push(async () => host.stop());
+    await host.handle(COVE_TUNNEL_PROTOCOL, (stream) =>
+      pipeStreamAndSocket(stream, NodeNet.connect(origin.port, "127.0.0.1")),
+    );
+    const peer = await openEnvironmentPeer({
+      targetPeerId: host.peerId.toString(),
+      directMultiaddrs: host.getMultiaddrs().map(String),
+      relayMultiaddrs: [],
+    });
+    cleanups.push(peer.stop);
+    const stream = await peer.openStream();
+    expect(stream.protocol).toBe(COVE_TUNNEL_PROTOCOL);
+    stream.send(
+      Buffer.from("GET /healthz HTTP/1.1\r\nHost: cove.invalid\r\nConnection: close\r\n\r\n"),
+    );
+    const received: Buffer[] = [];
+    for await (const chunk of stream) received.push(Buffer.from(chunk.subarray()));
+    expect(Buffer.concat(received).toString()).toContain("HTTP/1.1 200");
+    await stream.close();
   });
 
   it("proxies HTTP and WebSockets via createClientLibp2pProxy in both relay and p2p modes", async () => {

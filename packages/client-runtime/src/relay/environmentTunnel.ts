@@ -28,58 +28,114 @@ export class LanPeerTransport extends Context.Service<
   }
 >()("@t3tools/client-runtime/relay/environmentTunnel/LanPeerTransport") {}
 
+type LiveTunnel = OpenEnvironmentTunnel & {
+  readonly updateAddresses: (input: EnvironmentTunnelDial) => void | Promise<void>;
+};
+
 export function createEnvironmentTunnels(platform: {
   readonly verifyPeer: (environmentId: string, peerId: string) => Promise<void>;
-  readonly open: (input: EnvironmentTunnelDial) => Promise<OpenEnvironmentTunnel>;
+  readonly open: (input: EnvironmentTunnelDial) => Promise<LiveTunnel>;
 }) {
-  const active = new Map<string, { key: string; pending: Promise<OpenEnvironmentTunnel> }>();
-  const close = (pending: Promise<OpenEnvironmentTunnel>) => {
-    void pending.then(
+  interface Session {
+    requested: EnvironmentTunnelDial;
+    applied: EnvironmentTunnelDial;
+    pending: Promise<LiveTunnel>;
+    updates?: Promise<LiveTunnel>;
+  }
+  const active = new Map<string, Session>();
+  const sameList = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((entry, index) => entry === b[index]);
+  const sameAddresses = (a: EnvironmentTunnelDial, b: EnvironmentTunnelDial) =>
+    a.discoveryBaseUrl === b.discoveryBaseUrl &&
+    sameList(a.direct, b.direct) &&
+    sameList(a.relays, b.relays);
+
+  function release(id: string) {
+    const session = active.get(id);
+    active.delete(id);
+    void session?.pending.then(
       (tunnel) => tunnel.close(),
       () => {},
     );
-  };
-  function open(environmentId: string, input: EnvironmentTunnelDial, verify?: () => Promise<void>) {
-    const key = JSON.stringify(input);
-    const current = active.get(environmentId);
-    if (current?.key === key) return current.pending;
-    if (current) close(current.pending);
-    function isCurrent() {
-      return active.get(environmentId)?.pending === pending;
-    }
-    const pending: Promise<OpenEnvironmentTunnel> = Promise.resolve()
-      .then(async () => {
-        await verify?.();
-        if (!isCurrent()) throw new Error("Tunnel connection changed");
-        const tunnel = await platform.open(input);
-        if (isCurrent()) return tunnel;
-        tunnel.close();
-        throw new Error("Tunnel connection changed");
-      })
-      .catch((error) => {
-        if (isCurrent()) active.delete(environmentId);
-        throw error;
+  }
+
+  function open(id: string, input: EnvironmentTunnelDial, verify?: () => Promise<void>) {
+    const current = active.get(id);
+    if (current?.requested.peerId === input.peerId) {
+      current.requested = input;
+      if (current.updates) return current.updates;
+      if (sameAddresses(current.applied, input)) return current.pending;
+      const pending = current.pending.then(async (tunnel) => {
+        try {
+          while (active.get(id) === current) {
+            const latest = current.requested;
+            if (sameAddresses(current.applied, latest)) return tunnel;
+            try {
+              await tunnel.updateAddresses(latest);
+            } catch (error) {
+              if (!sameAddresses(latest, current.requested)) continue;
+              throw error;
+            }
+            current.applied = latest;
+          }
+          throw new Error("Tunnel connection changed");
+        } finally {
+          delete current.updates;
+        }
       });
-    active.set(environmentId, { key, pending });
-    return pending;
+      current.updates = pending;
+      return pending;
+    }
+    release(id);
+    const connect = async (): Promise<LiveTunnel> => {
+      await verify?.();
+      while (active.get(id) === session) {
+        const latest = session.requested;
+        let tunnel: LiveTunnel;
+        try {
+          tunnel = await platform.open(latest);
+        } catch (error) {
+          if (!sameAddresses(latest, session.requested)) continue;
+          throw error;
+        }
+        if (active.get(id) === session) {
+          session.applied = latest;
+          return tunnel;
+        }
+        tunnel.close();
+      }
+      throw new Error("Tunnel connection changed");
+    };
+    const session: Session = {
+      requested: input,
+      applied: input,
+      pending: Promise.resolve()
+        .then(connect)
+        .catch((error) => {
+          if (active.get(id) === session) active.delete(id);
+          throw error;
+        }),
+    };
+    active.set(id, session);
+    return session.pending;
   }
   return {
     lan: LanPeerTransport.of({
       openPairing: (peer) => platform.open({ ...peer, relays: [] }),
       prepare: (peer) => open("lan:" + peer.peerId, { ...peer, relays: [] }),
-      release(peerId) {
-        const key = "lan:" + peerId;
-        const current = active.get(key);
-        active.delete(key);
-        if (current) close(current.pending);
-      },
+      release: (peerId) => release("lan:" + peerId),
     }),
     prepare(environmentId: string, endpoint: RelayManagedEndpoint): Promise<OpenEnvironmentTunnel> {
+      const key = "managed:" + environmentId;
+      const current = active.get(key);
       if (
         endpoint.providerKind !== "libp2p_tunnel" ||
         !endpoint.libp2pPeerId ||
-        (!endpoint.libp2pRelayMultiaddrs?.length && !endpoint.libp2pDirectMultiaddrs?.length)
+        (!endpoint.libp2pRelayMultiaddrs?.length &&
+          !endpoint.libp2pDirectMultiaddrs?.length &&
+          current?.requested.peerId !== endpoint.libp2pPeerId)
       ) {
+        release(key);
         return Promise.reject(new Error("The environment has no authenticated tunnel endpoint"));
       }
       const input: EnvironmentTunnelDial = {
@@ -87,17 +143,10 @@ export function createEnvironmentTunnels(platform: {
         direct: endpoint.libp2pDirectMultiaddrs ?? [],
         relays: endpoint.libp2pRelayMultiaddrs ?? [],
       };
-      return open("managed:" + environmentId, input, () =>
-        platform.verifyPeer(environmentId, input.peerId),
-      );
+      return open(key, input, () => platform.verifyPeer(environmentId, input.peerId));
     },
     clear() {
-      for (const [id, entry] of active) {
-        if (id.startsWith("managed:")) {
-          active.delete(id);
-          close(entry.pending);
-        }
-      }
+      for (const id of active.keys()) if (id.startsWith("managed:")) release(id);
     },
   };
 }

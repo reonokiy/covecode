@@ -1,4 +1,5 @@
 // @effect-diagnostics globalFetch:off - This browser transport runs without an Effect runtime, like the live stream.
+import { fetchEnvironment } from "../environment/transport.ts";
 import { msg } from "gt-i18n";
 import { type MarkedText, markedTextEnglish } from "../errors/translatable.ts";
 import * as Schema from "effect/Schema";
@@ -27,7 +28,7 @@ export async function captureDeviceScreenshot(target: DeviceStreamTarget, signal
     `${target.access.httpBase}/vendor/${vendor}/api/screenshot?device=${encodeURIComponent(target.deviceId)}`,
     target.access,
   );
-  const response = await fetch(url, {
+  const response = await fetchEnvironment(url, {
     method: "POST",
     credentials: target.access.credentials ? "include" : "omit",
     signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),

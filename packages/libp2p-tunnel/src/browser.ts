@@ -1,15 +1,16 @@
+import { raceSignal } from "race-signal";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
 import { identify } from "@libp2p/identify";
-import type { Connection, Stream } from "@libp2p/interface";
+import type { Connection } from "@libp2p/interface";
 import { peerIdFromString } from "@libp2p/peer-id";
 import { webRTC, webRTCDirect } from "@libp2p/webrtc";
 import { webSockets } from "@libp2p/websockets";
 import { CODE_P2P, multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
-import { BROWSER_TUNNEL_PROTOCOL, chunkSize, frame, framedStream } from "./browserProtocol.ts";
-import { PeerWebSocket } from "./browserSocket.ts";
+import { BROWSER_TUNNEL_PROTOCOL, framedStream } from "./browserProtocol.ts";
+import { peerHttpClient } from "./peerHttpClient.ts";
 
 export async function openBrowserTunnel(input: {
   peerId: string;
@@ -18,19 +19,24 @@ export async function openBrowserTunnel(input: {
   refreshDirect?: (signal: AbortSignal) => Promise<readonly string[]>;
 }) {
   const peer = peerIdFromString(input.peerId);
-  const circuit = input.relays
-    .filter((addr) => /\/(?:ws|wss)(?:\/|$)/u.test(addr))
-    .map((addr) => addr.replace(/\/$/u, "") + "/p2p-circuit");
   const browserAddresses = (addresses: readonly string[]) =>
     addresses
       .filter((a) => a.endsWith(`/p2p/${peer}`) && /\/(?:wss|ws|webrtc-direct)(?:\/|$)/u.test(a))
       .slice(0, 16)
       .map((addr) => multiaddr(addr));
-  let direct = [
-    ...browserAddresses(input.direct),
-    ...circuit.map((addr) => multiaddr(`${addr}/webrtc/p2p/${peer}`)),
-  ];
-  const relayed = circuit.map((addr) => multiaddr(`${addr}/p2p/${peer}`));
+  function addresses(hints: { direct: readonly string[]; relays: readonly string[] }) {
+    const circuit = hints.relays
+      .filter((addr) => /\/(?:ws|wss)(?:\/|$)/u.test(addr))
+      .map((addr) => addr.replace(/\/$/u, "") + "/p2p-circuit");
+    const direct = [
+      ...browserAddresses(hints.direct),
+      ...circuit.map((addr) => multiaddr(`${addr}/webrtc/p2p/${peer}`)),
+    ];
+    const relayed = circuit.map((addr) => multiaddr(`${addr}/p2p/${peer}`));
+    const relayNodes = circuit.map((addr) => multiaddr(addr.slice(0, -"/p2p-circuit".length)));
+    return { direct, relayed, relayNodes };
+  }
+  let { direct, relayed, relayNodes } = addresses(input);
   if (direct.length === 0 && relayed.length === 0 && !input.refreshDirect) {
     throw new Error("No browser-accessible tunnel address");
   }
@@ -40,7 +46,7 @@ export async function openBrowserTunnel(input: {
       ? {
           connectionGater: {
             denyDialMultiaddr: (address) =>
-              !direct.some(
+              ![...direct, ...relayNodes, ...relayed].some(
                 (hint) => hint.equals(address) || hint.decapsulateCode(CODE_P2P).equals(address),
               ),
           },
@@ -66,7 +72,7 @@ export async function openBrowserTunnel(input: {
     const preferred = connections.find((c) => c.direct);
     if (preferred) return Promise.resolve(preferred);
     if (connections[0]) {
-      if (!upgrading && Date.now() - lastAttempt > 30_000)
+      if (direct.length && !upgrading && Date.now() - lastAttempt > 30_000)
         upgrading = tryDirect()
           .catch(() => {})
           .finally(() => {
@@ -84,7 +90,9 @@ export async function openBrowserTunnel(input: {
       }
       if (relayed.length === 0 && input.refreshDirect) {
         const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)]);
-        direct = browserAddresses(await input.refreshDirect(signal));
+        const previous = direct;
+        const discovered = await input.refreshDirect(signal);
+        if (direct === previous) direct = browserAddresses(discovered);
         if (!direct.length) throw new Error("No browser-accessible address for the paired peer");
         return tryDirect();
       }
@@ -103,98 +111,31 @@ export async function openBrowserTunnel(input: {
     await node.stop();
     throw error;
   }
-  async function openStream(signal?: AbortSignal): Promise<Stream> {
-    const conn = await connect();
-    if (!conn.remotePeer.equals(peer)) throw new Error("Unexpected environment peer");
-    return conn.newStream(BROWSER_TUNNEL_PROTOCOL, {
-      runOnLimitedConnection: true,
-      signal: signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal,
-    });
-  }
   return {
-    getActiveTransport: () =>
-      node
-        .getConnections(peer)
-        .some((connection) => connection.status === "open" && connection.direct)
-        ? "direct"
-        : "relay",
-    async fetch(
-      request: Request,
-      onUploadProgress?: (bytesSent: number) => void,
-    ): Promise<Response> {
-      const stream = await openStream(request.signal);
-      const wire = framedStream(stream);
-      const abort = () => stream.abort(new Error("Request cancelled"));
-      request.signal.addEventListener("abort", abort, { once: true });
-      stream.addEventListener("close", () => request.signal.removeEventListener("abort", abort), {
-        once: true,
-      });
-      try {
-        const url = new URL(request.url);
-        await wire.json({
-          method: request.method,
-          path: url.pathname + url.search,
-          headers: [...request.headers],
-        });
-        const upload = async () => {
-          if (request.body) {
-            const reader = request.body.getReader();
-            let sent = 0;
-            try {
-              while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                for (let i = 0; i < value.length; i += chunkSize) {
-                  const chunk = value.subarray(i, i + chunkSize);
-                  await wire.write(frame.data, chunk);
-                  sent += chunk.byteLength;
-                  onUploadProgress?.(sent);
-                }
-              }
-            } finally {
-              reader.releaseLock();
-            }
-          }
-          await wire.write(frame.end);
-        };
-        const [metadata] = await Promise.all([wire.readJson(), upload()]);
-        if (
-          !metadata ||
-          typeof metadata !== "object" ||
-          !("status" in metadata) ||
-          typeof metadata.status !== "number" ||
-          !("headers" in metadata) ||
-          !Array.isArray(metadata.headers)
-        )
-          throw new Error("Invalid tunnel response");
-        const noBody = request.method === "HEAD" || [204, 205, 304].includes(metadata.status);
-        const body = noBody
-          ? null
-          : new ReadableStream<Uint8Array>({
-              async pull(controller) {
-                try {
-                  const message = await wire.read();
-                  if (message.type === frame.end) {
-                    controller.close();
-                    await stream.close();
-                  } else if (message.type === frame.data) controller.enqueue(message.data);
-                  else throw new Error("Invalid response body frame");
-                } catch (error) {
-                  abort();
-                  controller.error(error);
-                }
-              },
-              cancel: abort,
-            });
-        if (noBody) await stream.close();
-        return new Response(body, { status: metadata.status, headers: metadata.headers });
-      } catch (error) {
-        abort();
-        throw error;
-      }
+    updateAddresses(hints: { direct: readonly string[]; relays: readonly string[] }) {
+      ({ direct, relayed, relayNodes } = addresses(hints));
     },
-    socket: (url: URL, protocols?: string | string[]) =>
-      new PeerWebSocket(url, openStream, protocols),
+    getActiveTransport: () => {
+      const open = node.getConnections(peer).filter((connection) => connection.status === "open");
+      return open.some((connection) => connection.direct)
+        ? "direct"
+        : open.length
+          ? "relay"
+          : "disconnected";
+    },
+    ...peerHttpClient(async (signal) => {
+      signal.throwIfAborted();
+      const conn = await raceSignal(connect(), signal);
+      if (!conn.remotePeer.equals(peer)) throw new Error("Unexpected environment peer");
+      const stream = await conn.newStream(BROWSER_TUNNEL_PROTOCOL, {
+        runOnLimitedConnection: true,
+        signal: AbortSignal.any([signal, lifetime.signal]),
+      });
+      return {
+        ...framedStream(stream),
+        transport: conn.direct ? ("direct" as const) : ("relay" as const),
+      };
+    }),
     async close() {
       lifetime.abort();
       await node.stop();

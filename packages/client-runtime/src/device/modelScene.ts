@@ -1,4 +1,5 @@
 // @effect-diagnostics globalFetch:off - This browser-only renderer owns abortable asset requests without an Effect runtime, like the live stream.
+import { fetchEnvironment } from "../environment/transport.ts";
 import { Box3, Group, Mesh, MeshBasicMaterial, Texture, type Material, type Object3D } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { DeviceAssetSource } from "./model.ts";
@@ -101,7 +102,7 @@ export function createImportedPhoneScene(
 }
 
 export async function loadDeviceModel(source: DeviceAssetSource, signal: AbortSignal) {
-  const response = await fetch(source.url, { signal });
+  const response = await fetchEnvironment(source.url, { signal });
   if (!response.ok) throw new Error(`Device model request failed: ${response.status}`);
   const data = await response.arrayBuffer();
   signal.throwIfAborted();

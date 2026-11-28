@@ -1,3 +1,4 @@
+import { fetchEnvironment } from "@t3tools/client-runtime/environment";
 import { withDeviceHubQuery } from "@t3tools/client-runtime/state/deviceHubAccess";
 import type { DeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubAccess";
 import type { DevicePlatform } from "@t3tools/contracts";
@@ -51,7 +52,7 @@ const fetchJson = async (
   url: string,
   signal?: AbortSignal,
 ): Promise<unknown> => {
-  const response = await fetch(url, {
+  const response = await fetchEnvironment(url, {
     cache: "no-store",
     credentials: target.access.credentials ? "include" : "same-origin",
     ...(signal ? { signal } : {}),

@@ -3,6 +3,7 @@ import type * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Socket from "effect/socket/Socket";
 
+import { fetchEnvironment, openEnvironmentSocket } from "@t3tools/client-runtime/environment";
 import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import * as RelayTracing from "@t3tools/shared/relayTracing";
 import * as PrimaryEnvironmentHttpClient from "../environments/primary/httpClient";
@@ -21,7 +22,7 @@ function configuredRelayUrl(): string {
   return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
 }
 
-const layerHttpClient = layerRemoteHttpClient((input, init) => globalThis.fetch(input, init));
+const layerHttpClient = layerRemoteHttpClient(fetchEnvironment);
 const layerRelayTracing = RelayTracing.layer(
   resolveRelayTracingConfig(),
   {
@@ -66,7 +67,11 @@ export function __setPrimaryHttpRunnerForTests(runner?: PrimaryHttpEffectRunner)
 const layerRuntime = Layer.mergeAll(
   layerHttpClient,
   Dpop.layer,
-  Socket.layerWebSocketConstructorGlobal,
+  Layer.succeed(Socket.WebSocketConstructor, (url, options) => {
+    if (options !== undefined && typeof options !== "string" && !Array.isArray(options))
+      throw new TypeError("WebSocket client options are unsupported in the browser");
+    return openEnvironmentSocket(url, options);
+  }),
   ClientTracer.layer,
   layerRelayTracing,
   ManagedRelayLayer.layer(configuredRelayUrl()).pipe(

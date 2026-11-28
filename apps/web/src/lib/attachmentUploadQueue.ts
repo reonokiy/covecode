@@ -6,7 +6,7 @@ import {
   type ChatAttachment,
   type EnvironmentId,
 } from "@t3tools/contracts";
-import { browserTunnelHost, parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
@@ -33,6 +33,7 @@ import {
   type ComposerThreadTarget,
 } from "../composerDraftStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { uploadEnvironmentFile } from "../connection/uploadEnvironmentFile";
 import { environmentCatalog } from "../connection/catalog";
 import { assetEnvironment } from "../state/assets";
 import { attachmentEnvironment } from "../state/attachments";
@@ -41,7 +42,6 @@ import type { AttachmentUploadState, ReadyAttachmentUpload } from "./attachmentU
 import { m } from "../i18n/messages";
 
 const MAX_UPLOADS_PER_ENVIRONMENT = 3;
-const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 
 interface AttachmentUploadStore {
   readonly uploadsByImageId: Readonly<Record<string, AttachmentUploadState>>;
@@ -139,65 +139,6 @@ function deletePendingUpload(environmentId: EnvironmentId, attachmentId: string)
     remove: attachmentEnvironment.remove,
     environmentId,
     attachmentId,
-  });
-}
-
-function uploadBytes(input: {
-  readonly url: string;
-  readonly file: File;
-  readonly mimeType: string;
-  readonly signal: AbortSignal;
-  readonly onProgress: (progress: number) => void;
-}): Promise<void> {
-  if (browserTunnelHost.test(new URL(input.url).hostname)) {
-    const timeout = AbortSignal.timeout(UPLOAD_TIMEOUT_MS);
-    const signal = AbortSignal.any([input.signal, timeout]);
-    return import("../cloud/browserTunnel").then(async ({ fetchWebPeer }) => {
-      let response: Response;
-      try {
-        response = await fetchWebPeer(
-          new Request(input.url, {
-            method: "POST",
-            headers: { "content-type": input.mimeType },
-            body: input.file,
-            signal,
-          }),
-          (sent) => {
-            if (input.file.size) input.onProgress(sent / input.file.size);
-          },
-        );
-        await response.arrayBuffer();
-      } catch {
-        if (input.signal.aborted) throw new Error(m(msg("Upload cancelled")));
-        if (timeout.aborted) throw new Error(m(msg("Upload timed out")));
-        throw new Error(m(msg("Upload failed")));
-      }
-      if (!response.ok)
-        throw new Error(m(msg("Upload rejected ({status})", { status: response.status })));
-    });
-  }
-  const xhr = new XMLHttpRequest();
-  return new Promise<void>((resolve, reject) => {
-    xhr.open("POST", input.url, true);
-    xhr.timeout = UPLOAD_TIMEOUT_MS;
-    xhr.setRequestHeader("Content-Type", input.mimeType);
-    xhr.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable && event.total > 0) {
-        input.onProgress(event.loaded / event.total);
-      }
-    });
-    xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else {
-        reject(new Error(m(msg("Upload rejected ({status})", { status: xhr.status }))));
-      }
-    });
-    xhr.addEventListener("error", () => reject(new Error(m(msg("Upload failed")))));
-    xhr.addEventListener("timeout", () => reject(new Error(m(msg("Upload timed out")))));
-    xhr.addEventListener("abort", () => reject(new Error(m(msg("Upload cancelled")))));
-    input.signal.addEventListener("abort", () => xhr.abort(), { once: true });
-    xhr.send(input.file);
   });
 }
 
@@ -305,7 +246,7 @@ const uploadJob = Effect.fn("WebAttachmentUploads.upload")(function* (job: Uploa
     transport: (url) =>
       Effect.tryPromise({
         try: (signal) =>
-          uploadBytes({
+          uploadEnvironmentFile({
             url,
             file,
             mimeType,

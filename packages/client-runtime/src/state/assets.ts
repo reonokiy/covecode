@@ -1,5 +1,5 @@
 import { previewPdfAssetUrl as resolvePreviewPdf } from "@t3tools/shared/preview";
-import { resolveTunnelResource } from "../environment/tunnelUrl.ts";
+import { resolveTunnelResource, tunnelResourceUrl } from "../environment/tunnelUrl.ts";
 import {
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
@@ -62,7 +62,18 @@ function parseAssetCollectionKey(
 export const previewPdfAssetUrl = (source: string, base: string | null) =>
   resolvePreviewPdf(source, base, resolveTunnelResource);
 
-export function resolveAssetUrl(httpBaseUrl: string, relativeUrl: string): string | null {
+export function resolveAssetUrl(
+  httpBaseUrl: string,
+  relativeUrl: string,
+  consumer: "client" | "environment" = "client",
+): string | null {
+  // A remote browser opens the signed path on the environment that minted it.
+  if (
+    consumer === "environment" &&
+    relativeUrl.startsWith("/api/assets/") &&
+    tunnelResourceUrl(httpBaseUrl)
+  )
+    return relativeUrl;
   try {
     return (
       resolveTunnelResource(httpBaseUrl, relativeUrl) ??

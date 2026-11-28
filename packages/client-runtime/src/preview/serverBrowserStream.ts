@@ -1,4 +1,9 @@
 // @effect-diagnostics globalTimers:off globalFetch:off - This browser and WebView transport runs without an Effect runtime.
+import {
+  fetchEnvironment,
+  openEnvironmentSocket,
+  resolveBrowserDownloadUrl,
+} from "../environment/transport.ts";
 import { type DeviceHubAccess, withDeviceHubQuery } from "../device/hubAccess.ts";
 import {
   PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE,
@@ -134,7 +139,7 @@ export async function uploadPreviewStreamFiles(
 ): Promise<void> {
   const body = new FormData();
   for (const file of files) body.append("file", file, file.name ?? "file");
-  const response = await fetch(chooser.uploadUrl, {
+  const response = await fetchEnvironment(chooser.uploadUrl, {
     method: "POST",
     body,
     credentials: chooser.credentials ? "include" : "omit",
@@ -146,13 +151,15 @@ export const previewStreamDownloadUrl = (
   target: Pick<PreviewStreamTarget, "access" | "threadId" | "tabId">,
   id: string,
 ): string =>
-  withDeviceHubQuery(
-    `${target.access.httpBase}/download?${new URLSearchParams({
-      threadId: target.threadId,
-      tabId: target.tabId,
-      id,
-    }).toString()}`,
-    target.access,
+  resolveBrowserDownloadUrl(
+    withDeviceHubQuery(
+      `${target.access.httpBase}/download?${new URLSearchParams({
+        threadId: target.threadId,
+        tabId: target.tabId,
+        id,
+      }).toString()}`,
+      target.access,
+    ),
   );
 
 export interface PreviewStreamProbe {
@@ -241,7 +248,7 @@ export function createPreviewStreamClient(
 
   const connect = () => {
     if (stopped) return;
-    const ws = new WebSocket(url);
+    const ws = openEnvironmentSocket(url);
     ws.binaryType = "arraybuffer";
     socket = ws;
     let opened = false;

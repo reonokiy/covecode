@@ -1691,6 +1691,9 @@ importers:
       multicast-dns:
         specifier: 'catalog:'
         version: 7.2.5
+      race-signal:
+        specifier: 2.0.2
+        version: 2.0.2
       ws:
         specifier: 'catalog:'
         version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)

@@ -10,6 +10,7 @@ export function environmentPeerIdFromKey(bytes: Uint8Array): string {
   return peerIdFromPrivateKey(keys.privateKeyFromProtobuf(bytes)).toString();
 }
 
+export const HTTP_OVER_LIBP2P = "/http/1.1";
 export const COVE_TUNNEL_PROTOCOL = "/cove/http-tunnel/1.0.0";
 export const COVE_TUNNEL_REGISTER_PROTOCOL = "/cove/tunnel-register/1.0.0";
 
@@ -51,12 +52,6 @@ export async function loadOrCreateLibp2pPrivateKey(keyPath?: string): Promise<Pr
  * operate on it directly via `createConnection` or `.pipe()`.
  */
 export class Libp2pStreamDuplex extends NodeStream.Duplex {
-  readonly remoteAddress = "127.0.0.1";
-  readonly remoteFamily = "IPv4";
-  readonly remotePort = 0;
-  readonly localAddress = "127.0.0.1";
-  readonly localPort = 0;
-
   private readonly p2pStream: Stream;
   private eofPushed = false;
   private listenersDetached = false;

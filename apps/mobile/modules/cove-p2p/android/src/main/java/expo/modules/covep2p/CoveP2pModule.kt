@@ -12,6 +12,8 @@ internal object NativeTunnel {
 
   @JvmStatic external fun open(context: Context, endpoint: String): String
 
+  @JvmStatic external fun update(url: String, endpoint: String)
+
   @JvmStatic external fun close(url: String)
 }
 
@@ -32,6 +34,12 @@ class CoveP2pModule : Module() {
         tunnels.add(url)
       }
       url
+    }
+    Function("update") { url: String, endpoint: String ->
+      synchronized(tunnels) {
+        check(url in tunnels)
+        NativeTunnel.update(url, endpoint)
+      }
     }
     Function("close") { url: String ->
       synchronized(tunnels) { if (tunnels.remove(url)) NativeTunnel.close(url) }

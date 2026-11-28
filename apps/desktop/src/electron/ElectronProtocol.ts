@@ -116,6 +116,7 @@ function registerDesktopSchemePrivilegesSync(): void {
         standard: true,
         secure: true,
         supportFetchAPI: true,
+        allowServiceWorkers: true,
         corsEnabled: true,
         stream: true,
         // Custom schemes must opt into V8 caching; dev URLs serve changing code.
@@ -128,6 +129,7 @@ function registerDesktopSchemePrivilegesSync(): void {
         standard: true,
         secure: true,
         supportFetchAPI: true,
+        allowServiceWorkers: true,
         corsEnabled: true,
         stream: true,
       },

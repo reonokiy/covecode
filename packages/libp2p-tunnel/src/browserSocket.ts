@@ -1,10 +1,9 @@
-import type { Stream } from "@libp2p/interface";
+// @effect-diagnostics globalConsole:off - This standalone WebSocket adapter reports the local connection path in DevTools.
 import {
   bytesText,
   closePayload,
   readClosePayload,
   frame,
-  framedStream,
   textBytes,
   type BrowserWire,
 } from "./browserProtocol.ts";
@@ -19,19 +18,19 @@ export class PeerWebSocket extends EventTarget implements WebSocket {
   bufferedAmount = 0;
   readonly extensions = "";
   protocol = "";
+  transport: "direct" | "relay" | "disconnected" = "disconnected";
   readonly url: string;
   onopen: WebSocket["onopen"] = null;
   onerror: WebSocket["onerror"] = null;
   onclose: WebSocket["onclose"] = null;
   onmessage: WebSocket["onmessage"] = null;
   private readonly lifetime = new AbortController();
-  private stream?: Stream;
   private wire?: BrowserWire;
   private writes = Promise.resolve();
 
   constructor(
     url: URL,
-    open: (signal: AbortSignal) => Promise<Stream>,
+    open: (signal: AbortSignal) => Promise<BrowserWire>,
     protocols?: string | string[],
   ) {
     super();
@@ -41,15 +40,14 @@ export class PeerWebSocket extends EventTarget implements WebSocket {
 
   private async run(
     url: URL,
-    open: (signal: AbortSignal) => Promise<Stream>,
+    open: (signal: AbortSignal) => Promise<BrowserWire>,
     protocols?: string | string[],
   ) {
-    this.stream = await open(this.lifetime.signal);
+    const wire = (this.wire = await open(this.lifetime.signal));
     if (this.lifetime.signal.aborted) {
-      this.stream.abort(new Error("Socket closed"));
+      wire.abort(new Error("Socket closed"));
       return;
     }
-    const wire = (this.wire = framedStream(this.stream));
     await wire.json({
       method: "WS",
       path: url.pathname + url.search,
@@ -61,6 +59,13 @@ export class PeerWebSocket extends EventTarget implements WebSocket {
       throw new Error("Socket upgrade failed");
     if ("protocol" in reply && typeof reply.protocol === "string") this.protocol = reply.protocol;
     if (this.readyState !== this.CONNECTING) return;
+    this.transport =
+      wire.transport ??
+      ("transport" in reply && (reply.transport === "direct" || reply.transport === "relay")
+        ? reply.transport
+        : "disconnected");
+    if (url.pathname === "/ws")
+      console.info("Cove RPC WebSocket opened", { transport: this.transport });
     this.readyState = this.OPEN;
     const opened = new Event("open");
     this.dispatchEvent(opened);
@@ -130,11 +135,12 @@ export class PeerWebSocket extends EventTarget implements WebSocket {
 
   private finish(clean: boolean, code = clean ? 1000 : 1006, reason = "") {
     if (this.readyState === this.CLOSED) return;
+    this.transport = "disconnected";
     this.readyState = this.CLOSED;
     this.lifetime.abort();
-    if (clean) void this.stream?.close().catch(() => {});
+    if (clean) void this.wire?.close().catch(() => {});
     else {
-      this.stream?.abort(new Error("Environment tunnel closed"));
+      this.wire?.abort(new Error("Environment tunnel closed"));
       const error = new Event("error");
       this.dispatchEvent(error);
       this.onerror?.(error);

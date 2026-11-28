@@ -30,6 +30,7 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { EnvironmentHttpServer } from "../environment/EnvironmentHttpServer.ts";
 import * as ServerConfig from "../config.ts";
 import * as ManagedLimits from "../policy/managedLimits.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
@@ -223,6 +224,7 @@ export const make = Effect.fn("CloudManagedEndpointRuntime.make")(function* (fac
   const createTunnel = factoryOptions?.createTunnel ?? createEnvironmentLibp2pTunnel;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const server = yield* EnvironmentHttpServer;
   const path = yield* Path.Path;
   const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
   const connectAllowed = ManagedLimits.allowsConnect(yield* ManagedPolicy.ManagedPolicy);
@@ -449,8 +451,7 @@ export const make = Effect.fn("CloudManagedEndpointRuntime.make")(function* (fac
           endpointId,
           endpointKey,
           connectorToken: config.connectorToken,
-          localHost: origin.localHttpHost,
-          localPort: origin.localHttpPort,
+          server,
           enableP2p: config.transportMode !== "relay",
           keyPath,
           onStatusChange,

@@ -29,6 +29,19 @@ fn start(json: &str) -> Result<String, Error> {
     Ok(url)
 }
 
+fn update(url: &str, json: &str) -> Result<(), Error> {
+    let endpoint: super::Endpoint = serde_json::from_str(json)?;
+    let tunnels = TUNNELS.lock().map_err(|_| "tunnel registry unavailable")?;
+    let tunnel = tunnels.get(url).ok_or("tunnel closed")?;
+    if endpoint.peer_id.parse::<libp2p::PeerId>()? != tunnel.peer {
+        return Err("peer identity changed".into());
+    }
+    tunnel
+        .addresses
+        .send(super::dial_addresses(&endpoint, tunnel.peer))?;
+    Ok(())
+}
+
 fn stop(url: &str) {
     if let Ok(mut tunnels) = TUNNELS.lock() {
         tunnels.remove(url);
@@ -52,6 +65,20 @@ mod c {
         result
             .and_then(|s| CString::new(s).ok())
             .map_or(std::ptr::null_mut(), CString::into_raw)
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn cove_tunnel_update(url: *const c_char, json: *const c_char) -> bool {
+        if url.is_null() || json.is_null() {
+            return false;
+        }
+        let (Ok(url), Ok(json)) = (
+            unsafe { CStr::from_ptr(url) }.to_str(),
+            unsafe { CStr::from_ptr(json) }.to_str(),
+        ) else {
+            return false;
+        };
+        update(url, json).is_ok()
     }
 
     #[unsafe(no_mangle)]
@@ -156,6 +183,24 @@ pub(super) mod android {
             );
             std::ptr::null_mut()
         })
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_expo_modules_covep2p_NativeTunnel_update(
+        mut env: JNIEnv,
+        _: JClass,
+        url: JString,
+        input: JString,
+    ) {
+        let result = (|| -> Result<(), Error> {
+            update(
+                &String::from(env.get_string(&url)?),
+                &String::from(env.get_string(&input)?),
+            )
+        })();
+        if result.is_err() {
+            let _ = env.throw_new("java/io/IOException", "Could not update environment tunnel");
+        }
     }
 
     #[unsafe(no_mangle)]

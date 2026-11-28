@@ -21,6 +21,23 @@ import type {
   DesktopAppActivationResponse,
 } from "./desktopAppActivation.ts";
 
+export const DesktopTunnelFrame = Schema.Struct({
+  type: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 4 })),
+  // Match the Node WebSocket message limit across the Electron process boundary.
+  data: Schema.Uint8Array.check(Schema.isMaxLength(100 * 1024 * 1024)),
+});
+
+export const DesktopTunnelAddresses = Schema.Struct({
+  direct: Schema.Array(Schema.String),
+  relays: Schema.Array(Schema.String),
+});
+
+export const DesktopTunnelOperation = Schema.Struct({
+  tunnel: Schema.String,
+  stream: Schema.String,
+  action: Schema.Union([Schema.Literals(["open", "read", "close"]), DesktopTunnelFrame]),
+});
+
 export interface ContextMenuItem<T extends string = string> {
   id: T;
   label: string;
@@ -1122,10 +1139,18 @@ export interface DesktopBridge {
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   openEnvironmentTunnel?: (input: {
     readonly peerId: string;
+    readonly lanDiscovery?: boolean;
     readonly direct: readonly string[];
     readonly relays: readonly string[];
   }) => Promise<string>;
-  closeEnvironmentTunnel?: (url: string) => Promise<void>;
+  updateEnvironmentTunnel?: (
+    id: string,
+    addresses: typeof DesktopTunnelAddresses.Type,
+  ) => Promise<void>;
+  closeEnvironmentTunnel?: (id: string) => Promise<void>;
+  exchangeEnvironmentFrame?: (
+    operation: typeof DesktopTunnelOperation.Type,
+  ) => Promise<typeof DesktopTunnelFrame.Type | null>;
   getConnectionCatalog: () => Promise<string | null>;
   setConnectionCatalog: (catalog: string) => Promise<boolean>;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;

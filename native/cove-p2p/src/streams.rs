@@ -16,13 +16,16 @@ use std::{
 };
 
 #[derive(Debug)]
-pub(super) struct OpenStream(Open);
+pub(super) struct OpenStream {
+    reply: Open,
+    relayed: bool,
+}
 
 impl UpgradeInfo for OpenStream {
     type Info = StreamProtocol;
-    type InfoIter = std::iter::Once<StreamProtocol>;
+    type InfoIter = std::array::IntoIter<StreamProtocol, 2>;
     fn protocol_info(&self) -> Self::InfoIter {
-        std::iter::once(TUNNEL)
+        [StreamProtocol::new("/http/1.1"), TUNNEL].into_iter()
     }
 }
 
@@ -31,7 +34,10 @@ impl OutboundUpgrade<Stream> for OpenStream {
     type Error = Infallible;
     type Future = Ready<Result<Opened, Infallible>>;
     fn upgrade_outbound(self, stream: Stream, _: StreamProtocol) -> Self::Future {
-        let _ = self.0.send(Ok(stream));
+        let _ = self.reply.send(Ok(super::OpenedStream {
+            stream,
+            relayed: self.relayed,
+        }));
         ready(Ok(Opened))
     }
 }
@@ -58,8 +64,15 @@ impl Streams {
             .iter()
             .filter(|(_, (id, _))| *id == peer)
             .min_by_key(|(_, (_, relayed))| *relayed);
-        if let Some((id, _)) = path {
-            self.pending.push_back((peer, *id, OpenStream(reply)));
+        if let Some((id, (_, relayed))) = path {
+            self.pending.push_back((
+                peer,
+                *id,
+                OpenStream {
+                    reply,
+                    relayed: *relayed,
+                },
+            ));
         } else {
             let _ = reply.send(Err(io::Error::new(
                 io::ErrorKind::NotConnected,

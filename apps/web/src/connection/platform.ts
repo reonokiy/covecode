@@ -41,6 +41,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { fetchEnvironment } from "@t3tools/client-runtime/environment";
 import { FetchHttpClient } from "effect/http";
 
 import { APP_VERSION } from "../branding";
@@ -829,7 +830,13 @@ const layerPlatformConnectionSource = Layer.effect(
 
       yield* Ref.set(cacheRef, next);
       return registrations as ReadonlyArray<PlatformConnectionRegistration>;
-    }).pipe(Effect.provide(FetchHttpClient.layer));
+    }).pipe(
+      Effect.provide(
+        FetchHttpClient.layer.pipe(
+          Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchEnvironment)),
+        ),
+      ),
+    );
 
     return PlatformConnectionSource.PlatformConnectionSource.of({
       registrations: Stream.tick(PLATFORM_POLL_INTERVAL).pipe(

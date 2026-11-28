@@ -1,8 +1,10 @@
+import type * as NodeStream from "node:stream";
 import * as NodeHttp from "node:http";
 import * as NodeEvents from "node:events";
 import { WebSocket, createWebSocketStream } from "ws";
 import type { Stream } from "@libp2p/interface";
 import {
+  type BrowserWire,
   chunkSize,
   closePayload,
   readClosePayload,
@@ -12,8 +14,17 @@ import {
   textBytes,
 } from "./browserProtocol.ts";
 
-export async function serveBrowserStream(stream: Stream, host: string, port: number) {
-  const wire = framedStream(stream);
+export async function serveBrowserStream(stream: Stream, connect: () => NodeStream.Duplex) {
+  return serveBrowserWire(framedStream(stream), connect, 16 * 1024 * 1024);
+}
+
+export async function serveBrowserWire(
+  wire: BrowserWire,
+  connect: () => NodeStream.Duplex | Promise<NodeStream.Duplex>,
+  maxPayload?: number,
+  selectedTransport?: () => "direct" | "relay" | undefined,
+) {
+  let target: NodeStream.Duplex | undefined;
   try {
     const head = requestHead(await wire.readJson());
     const headers = Object.fromEntries(head.headers);
@@ -27,12 +38,16 @@ export async function serveBrowserStream(stream: Stream, host: string, port: num
     }
     headers["accept-encoding"] = "identity";
     headers.host = "cove.invalid";
+    const socketStream = await connect();
+    target = socketStream;
+    wire.signal.throwIfAborted();
+    const createConnection = () => socketStream;
     if (head.method === "WS") {
-      const socket = new WebSocket(
-        `ws://${host.includes(":") ? `[${host.replace(/^\[|\]$/gu, "")}]` : host}:${port}${head.path}`,
-        head.protocols,
-        { headers, maxPayload: 16 * 1024 * 1024 },
-      );
+      const socket = new WebSocket(`ws://cove.invalid${head.path}`, head.protocols, {
+        headers,
+        createConnection,
+        ...(maxPayload !== undefined ? { maxPayload } : {}),
+      });
       // Object mode preserves text frames and lets Node pause reads on libp2p backpressure.
       const duplex = createWebSocketStream(socket, { readableObjectMode: true });
       const closed = new Promise<Uint8Array>((resolve) =>
@@ -40,10 +55,14 @@ export async function serveBrowserStream(stream: Stream, host: string, port: num
       );
       duplex.on("error", () => socket.terminate());
       const abort = () => socket.terminate();
-      stream.addEventListener("close", abort, { once: true });
+      wire.signal.addEventListener("abort", abort, { once: true });
       try {
         await NodeEvents.EventEmitter.once(socket, "open");
-        await wire.json({ status: 101, protocol: socket.protocol });
+        await wire.json({
+          status: 101,
+          protocol: socket.protocol,
+          transport: selectedTransport?.(),
+        });
         const send = async () => {
           for await (const data of duplex) {
             await wire.write(
@@ -52,7 +71,6 @@ export async function serveBrowserStream(stream: Stream, host: string, port: num
             );
           }
           await wire.write(frame.close, await closed);
-          await stream.close();
         };
         const outbound = send();
         const receive = async () => {
@@ -74,21 +92,22 @@ export async function serveBrowserStream(stream: Stream, host: string, port: num
         };
         await Promise.race([outbound, receive()]);
       } finally {
-        stream.removeEventListener("close", abort);
+        wire.signal.removeEventListener("abort", abort);
         duplex.destroy();
         socket.terminate();
       }
     } else {
+      headers.connection = "close";
       const req = NodeHttp.request({
-        host,
-        port,
+        host: "cove.invalid",
+        createConnection,
         method: head.method,
         path: head.path,
         headers,
-        agent: false,
+        setHost: false,
       });
       const abort = () => req.destroy();
-      stream.addEventListener("close", abort, { once: true });
+      wire.signal.addEventListener("abort", abort, { once: true });
       const response = NodeEvents.EventEmitter.once(req, "response").then(async ([response]) => {
         const res: NodeHttp.IncomingMessage = response;
         const pairs: string[][] = [];
@@ -105,28 +124,29 @@ export async function serveBrowserStream(stream: Stream, host: string, port: num
         await wire.write(frame.end);
       });
       try {
-        await Promise.all([
-          response,
-          (async () => {
-            while (true) {
-              const message = await wire.read();
-              if (message.type === frame.end) {
-                req.end();
-                return;
-              }
-              if (message.type !== frame.data || message.data.length > chunkSize)
-                throw new Error("Invalid request body frame");
-              if (!req.write(message.data)) await NodeEvents.EventEmitter.once(req, "drain");
+        req.flushHeaders();
+        const upload = async () => {
+          while (true) {
+            const message = await wire.read();
+            if (message.type === frame.end) {
+              req.end();
+              return;
             }
-          })(),
-        ]);
+            if (message.type !== frame.data || message.data.length > chunkSize)
+              throw new Error("Invalid request body frame");
+            if (!req.write(message.data)) await NodeEvents.EventEmitter.once(req, "drain");
+          }
+        };
+        await Promise.race([response, upload().then(() => response)]);
       } finally {
-        stream.removeEventListener("close", abort);
+        wire.signal.removeEventListener("abort", abort);
         req.destroy();
       }
     }
-    await stream.close();
+    await wire.close();
   } catch (error) {
-    stream.abort(error instanceof Error ? error : new Error("Browser tunnel failed"));
+    wire.abort(error instanceof Error ? error : new Error("Browser tunnel failed"));
+  } finally {
+    target?.destroy();
   }
 }

@@ -2,9 +2,18 @@
 
 Each connection joins a client to one environment over HTTP and WebSocket. The
 environment owns providers, execution, files, and durable state. Direct access,
-Tailscale, SSH, and T3 Connect change how the client reaches that server; they do
-not introduce another execution model. See
+Tailscale, SSH, and libp2p carry requests to the same HTTP routes and WebSocket
+upgrade handlers. See
 [remote access](../user/remote-access.md) for setup.
+
+For a paired libp2p environment the connection layer owns the pinned peer,
+discovery, and the choice between a direct stream and a relay circuit. HTTP clients
+use the prepared base URL for requests and WebSocket upgrades. A desktop or Web
+peer URL is valid only in the document that opened it. The transport maps its
+authority to `cove.invalid` when sending requests and signing DPoP proofs.
+The peer ID anchors a session. Address updates change subsequent dials while
+open HTTP streams and WebSockets retain their connection. The RPC WebSocket
+logs its selected direct or relay path when it opens.
 
 ## Identity is independent of the route
 
@@ -59,10 +68,12 @@ A background service with no configured host is what makes this work for
 headless machines. It listens on every IPv4 interface and closes each
 connection unless both addresses of the direct peer are loopback, private, or
 tailnet IPv4. That keeps a VPS's public address closed, including a cloud VM
-whose public address is NATed to a private interface. It is not a firewall:
-T3 Connect and Tailscale Serve reach the server over loopback by design, and a
-proxy that rewrites the source address looks private. One listener per address would
-miss a DHCP change, and the wildcard keeps the reported addresses current.
+whose public address is NATed to a private interface. A TCP proxy that rewrites the
+source address looks private. Tailscale Serve connects over loopback. The libp2p
+listener admits peers separately and passes their streams to the HTTP handlers
+in-process. Both paths enforce the environment's application authentication.
+One listener per address would miss a DHCP change, and the wildcard keeps the
+reported addresses current.
 
 Pull request routing trust covers the whole route list. Adding or changing a route
 revokes it; reordering does not, because the same addresses remain trusted.

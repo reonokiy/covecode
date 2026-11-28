@@ -1,3 +1,4 @@
+import { registerEnvironmentPeer } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { Atom, AsyncResult } from "effect/reactivity";
@@ -13,7 +14,6 @@ import {
 
 const mocks = vi.hoisted(() => ({
   connectionStateAtom: vi.fn(),
-  fetchWebPeer: vi.fn(),
   createAssetUrl: vi.fn(),
   createUploadUrl: Symbol("create-upload-url"),
   executeAtomQuery: vi.fn(),
@@ -36,8 +36,6 @@ const mocks = vi.hoisted(() => ({
       ),
     ),
 }));
-
-vi.mock("../cloud/browserTunnel", () => ({ fetchWebPeer: mocks.fetchWebPeer }));
 
 vi.mock("@t3tools/client-runtime/state/runtime", async () => {
   const Effect = await import("effect/Effect");
@@ -245,14 +243,17 @@ describe("attachmentUploadQueue", () => {
     mocks.readPreparedConnection.mockReturnValue({ httpBaseUrl: base });
     let bytes: Uint8Array | undefined;
     let url: string | undefined;
-    mocks.fetchWebPeer.mockImplementationOnce(
-      async (request: Request, progress: (sent: number) => void) => {
+    const unregister = registerEnvironmentPeer(new URL(base).hostname, {
+      async fetch(request, progress) {
         bytes = new Uint8Array(await request.arrayBuffer());
         url = request.url;
-        progress(bytes.length);
+        progress?.(bytes.length);
         return new Response(null, { status: 204 });
       },
-    );
+      resourceUrl: vi.fn(),
+      socket: vi.fn(),
+    });
+    using _peer = { [Symbol.dispose]: unregister };
     const image = makeImage("encrypted");
     startAttachmentUpload({ environmentId: firstEnvironment, image });
     await awaitAttachmentUploads([image.id]);

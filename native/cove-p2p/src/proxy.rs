@@ -69,7 +69,8 @@ async fn forward(
     }
     let (reply, rx) = oneshot::channel();
     tx.try_send(reply).map_err(io::Error::other)?;
-    let stream = rx.await.map_err(io::Error::other)??;
+    let super::OpenedStream { stream, relayed } = rx.await.map_err(io::Error::other)??;
+    let rpc = request.uri().path() == "/ws";
     let (mut sender, connection) = conn::http1::handshake(TokioIo::new(stream.compat()))
         .await
         .map_err(io::Error::other)?;
@@ -90,6 +91,9 @@ async fn forward(
         let Some(downstream) = downstream else {
             return Ok(empty(StatusCode::BAD_GATEWAY));
         };
+        if rpc {
+            log_rpc_path(relayed);
+        }
         let upstream = upgrade::on(&mut response);
         tokio::spawn(async move {
             let pump = async {
@@ -102,6 +106,31 @@ async fn forward(
         });
     }
     Ok(response.map(BodyExt::boxed))
+}
+
+fn log_rpc_path(relayed: bool) {
+    let message = if relayed {
+        c"Cove RPC WebSocket opened: relay"
+    } else {
+        c"Cove RPC WebSocket opened: direct"
+    };
+    #[cfg(target_os = "android")]
+    {
+        use std::ffi::{c_char, c_int};
+        #[link(name = "log")]
+        unsafe extern "C" {
+            fn __android_log_write(
+                priority: c_int,
+                tag: *const c_char,
+                message: *const c_char,
+            ) -> c_int;
+        }
+        unsafe {
+            __android_log_write(4, c"CoveP2p".as_ptr(), message.as_ptr());
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    eprintln!("{}", message.to_string_lossy());
 }
 
 pub(super) async fn serve(

@@ -1,3 +1,4 @@
+import { fetchEnvironment } from "@t3tools/client-runtime/environment";
 import type { DeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubAccess";
 import { withDeviceHubQuery } from "@t3tools/client-runtime/state/deviceHubAccess";
 import * as Schema from "effect/Schema";
@@ -51,7 +52,7 @@ const foldRequest = async (
     `${access.httpBase}/vendor/serve-emu/api/fold?${new URLSearchParams({ device: deviceId })}`,
     access,
   );
-  const response = await fetch(url, {
+  const response = await fetchEnvironment(url, {
     method: posture ? "POST" : "GET",
     cache: "no-store",
     credentials: access.credentials ? "include" : "same-origin",

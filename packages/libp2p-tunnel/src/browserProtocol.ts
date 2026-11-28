@@ -23,23 +23,23 @@ export function readClosePayload(data: Uint8Array) {
   return { code: (data[0]! << 8) | data[1]!, reason: bytesText(data.subarray(2)) };
 }
 
-export function framedStream(stream: Stream) {
-  const wire = lpStream(stream, {
-    maxDataLength: 16 * 1024 * 1024 + 1,
-    maxBufferSize: 32 * 1024 * 1024,
-  });
+export interface TunnelFrame {
+  readonly type: number;
+  readonly data: Uint8Array;
+}
+
+export interface FrameChannel {
+  readonly transport?: "direct" | "relay";
+  readonly read: () => Promise<TunnelFrame>;
+  readonly write: (type: number, data?: Uint8Array) => Promise<void>;
+  readonly signal: AbortSignal;
+  readonly close: () => Promise<void>;
+  readonly abort: (error: Error) => void;
+}
+
+export function browserWire(channel: FrameChannel) {
   return {
-    async read() {
-      const message = await wire.read();
-      if (!message.byteLength) throw new Error("Empty tunnel frame");
-      return { type: message.get(0), data: message.subarray(1) };
-    },
-    write(type: number, data = new Uint8Array(0) as Uint8Array) {
-      const message = new Uint8Array(data.byteLength + 1);
-      message[0] = type;
-      message.set(data, 1);
-      return wire.write(message);
-    },
+    ...channel,
     json(value: unknown) {
       return this.write(frame.open, textBytes(JSON.stringify(value)));
     },
@@ -51,7 +51,32 @@ export function framedStream(stream: Stream) {
   };
 }
 
-export type BrowserWire = ReturnType<typeof framedStream>;
+export function framedStream(stream: Stream) {
+  const wire = lpStream(stream, {
+    maxDataLength: 16 * 1024 * 1024 + 1,
+    maxBufferSize: 32 * 1024 * 1024,
+  });
+  const closed = new AbortController();
+  stream.addEventListener("close", () => closed.abort(), { once: true });
+  return browserWire({
+    signal: closed.signal,
+    close: () => stream.close(),
+    abort: (error) => stream.abort(error),
+    async read() {
+      const message = await wire.read();
+      if (!message.byteLength) throw new Error("Empty tunnel frame");
+      return { type: message.get(0), data: message.subarray(1) };
+    },
+    write(type: number, data = new Uint8Array(0) as Uint8Array) {
+      const message = new Uint8Array(data.byteLength + 1);
+      message[0] = type;
+      message.set(data, 1);
+      return wire.write(message);
+    },
+  });
+}
+
+export type BrowserWire = ReturnType<typeof browserWire>;
 export function requestHead(value: unknown) {
   if (
     !value ||

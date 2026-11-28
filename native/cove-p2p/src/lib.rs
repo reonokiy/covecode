@@ -34,6 +34,7 @@ pub struct Endpoint {
     pub peer_id: String,
     pub direct: Vec<String>,
     pub relays: Vec<String>,
+    pub discovery_base_url: Option<String>,
 }
 
 fn target_address(address: &str, target: PeerId, circuit: bool) -> Result<Multiaddr, Error> {
@@ -142,6 +143,8 @@ async fn connect(
 
 pub struct Tunnel {
     pub base_url: String,
+    peer: PeerId,
+    addresses: watch::Sender<Vec<Multiaddr>>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -151,10 +154,15 @@ impl Drop for Tunnel {
     }
 }
 
-type Open = oneshot::Sender<io::Result<libp2p::Stream>>;
+#[derive(Debug)]
+struct OpenedStream {
+    stream: libp2p::Stream,
+    relayed: bool,
+}
 
-pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
-    let peer: PeerId = endpoint.peer_id.parse()?;
+type Open = oneshot::Sender<io::Result<OpenedStream>>;
+
+fn dial_addresses(endpoint: &Endpoint, peer: PeerId) -> Vec<Multiaddr> {
     let mut addresses = Vec::new();
     for (list, circuit) in [(&endpoint.direct, false), (&endpoint.relays, true)] {
         for raw in list.iter().take(16) {
@@ -163,7 +171,14 @@ pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
             }
         }
     }
-    let lan = endpoint.relays.is_empty();
+    addresses
+}
+
+pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
+    let peer: PeerId = endpoint.peer_id.parse()?;
+    let addresses = dial_addresses(&endpoint, peer);
+    let lan_only = endpoint.discovery_base_url.is_some();
+    let discover_lan = lan_only || endpoint.relays.is_empty();
     let mut swarm = SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
@@ -177,7 +192,7 @@ pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
         .with_relay_client(noise::Config::new, yamux::Config::default)?
         .with_behaviour(move |key, relay| -> Result<_, Error> {
             Ok(Behaviour {
-                mdns: if lan && !cfg!(target_os = "ios") {
+                mdns: if discover_lan && !cfg!(target_os = "ios") {
                     Some(mdns::tokio::Behaviour::new(
                         mdns::Config {
                             query_interval: Duration::from_secs(10),
@@ -200,15 +215,17 @@ pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
         })?
         .with_swarm_config(|config| config.with_idle_connection_timeout(Duration::from_secs(90)))
         .build();
-    if !lan {
+    if !lan_only {
         swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
     }
-    connect(&mut swarm, peer, &addresses, lan).await?;
+    connect(&mut swarm, peer, &addresses, discover_lan).await?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let authority = listener.local_addr()?.to_string();
     let prefix = format!("/.cove-tunnel/{}", Uuid::new_v4().simple());
     let base_url = format!("http://{authority}{prefix}/");
+    let (hints, latest) = watch::channel(addresses);
     let task = tokio::spawn(async move {
+        let mut discovered = Vec::new();
         let mut jobs = JoinSet::new();
         let (tx, mut rx) = mpsc::channel::<Open>(64);
         let (_lifetime, lifetime) = watch::channel(());
@@ -220,9 +237,14 @@ pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
                     jobs.spawn(proxy::serve(socket, tx.clone(), authority.clone(), prefix.clone(), lifetime.clone()));
                 }
                 Some(reply) = rx.recv() => {
-                    if let Err(error) = connect(&mut swarm, peer, &addresses, lan).await {
-                        let _ = reply.send(Err(io::Error::other(error.to_string())));
-                        continue;
+                    if reply.is_closed() { continue; }
+                    if !swarm.is_connected(&peer) {
+                        let mut addresses = latest.borrow().clone();
+                        addresses.extend(discovered.iter().cloned());
+                        if let Err(error) = connect(&mut swarm, peer, &addresses, discover_lan).await {
+                            let _ = reply.send(Err(io::Error::other(error.to_string())));
+                            continue;
+                        }
                     }
                     swarm.behaviour_mut().streams.open(peer, reply);
                 }
@@ -231,7 +253,7 @@ pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
                         SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) if peer_id == peer => {
                             for addr in info.listen_addrs.into_iter().take(16) {
                                 if let Ok(addr) = target_address(&addr.to_string(), peer, false)
-                                    && addresses.len() < 48 && !addresses.contains(&addr) { addresses.insert(0, addr); }
+                                    && discovered.len() < 16 && !discovered.contains(&addr) { discovered.insert(0, addr); }
                             }
                         }
                         _ => {}
@@ -240,5 +262,10 @@ pub async fn open(endpoint: Endpoint) -> Result<Tunnel, Error> {
             }
         }
     });
-    Ok(Tunnel { base_url, task })
+    Ok(Tunnel {
+        base_url,
+        peer,
+        addresses: hints,
+        task,
+    })
 }

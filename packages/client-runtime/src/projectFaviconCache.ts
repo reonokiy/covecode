@@ -1,3 +1,4 @@
+import { fetchEnvironment } from "./environment/transport.ts";
 import { EnvironmentId } from "@t3tools/contracts";
 import { mediaMimeType } from "@t3tools/shared/mediaPreview";
 import {
@@ -97,7 +98,7 @@ export function createProjectFaviconImageLoader(input: {
     signal: AbortSignal,
   ) => Promise<string>;
 }) {
-  const fetchImpl = input.fetch ?? globalThis.fetch;
+  const fetchImpl = input.fetch ?? fetchEnvironment;
   return async (url: string, signal: AbortSignal): Promise<string> => {
     const response = await fetchImpl(url, { signal });
     if (!response.ok) throw new Error(`Project icon request failed with ${response.status}.`);

@@ -1,43 +1,23 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
-import { noise } from "@chainsafe/libp2p-noise";
-import { yamux } from "@chainsafe/libp2p-yamux";
-import { circuitRelayTransport } from "@libp2p/circuit-relay-v2";
-import { dcutr } from "@libp2p/dcutr";
-import { identify, identifyPush } from "@libp2p/identify";
-import type { Connection, Libp2p, PrivateKey, Stream } from "@libp2p/interface";
-import { mdns } from "@libp2p/mdns";
-import * as NodeEvents from "node:events";
-import type { PeerInfo } from "@libp2p/interface";
-import { peerIdFromString } from "@libp2p/peer-id";
-import { tcp } from "@libp2p/tcp";
-import { webSockets } from "@libp2p/websockets";
-import { multiaddr } from "@multiformats/multiaddr";
-import { createLibp2p } from "libp2p";
+import {
+  openEnvironmentPeer,
+  type ActiveProxyTransport,
+  type EnvironmentPeerOptions,
+} from "./environmentPeer.ts";
+import type { TunnelTransportMode } from "./protocols.ts";
 
+export type { ActiveProxyTransport } from "./environmentPeer.ts";
 import {
   proxyHttpRequestOverStream,
   proxyUpgradeOverStream,
   writeUpgradeErrorResponse,
 } from "./httpBridge.ts";
-import {
-  COVE_TUNNEL_PROTOCOL,
-  loadOrCreateLibp2pPrivateKey,
-  type TunnelTransportMode,
-} from "./protocols.ts";
-
-export interface ClientLibp2pProxyOptions {
-  readonly relayMultiaddrs: readonly string[];
-  readonly targetPeerId: string;
-  readonly directMultiaddrs?: readonly string[];
-  readonly mode?: TunnelTransportMode;
+export interface ClientLibp2pProxyOptions extends EnvironmentPeerOptions {
   readonly listenHost?: string;
   readonly listenPort?: number;
-  readonly privateKey?: PrivateKey;
 }
-
-export type ActiveProxyTransport = "direct" | "relay" | "disconnected";
 
 export interface ClientLibp2pProxy {
   readonly httpBaseUrl: string;
@@ -49,148 +29,10 @@ export interface ClientLibp2pProxy {
   stop: () => Promise<void>;
 }
 
-function buildCircuitTargetMultiaddr(relayAddr: string, targetPeerId: string): string {
-  const cleaned = relayAddr.replace(/\/+$/gu, "");
-  return `${cleaned}/p2p-circuit/p2p/${targetPeerId}`;
-}
-
 export async function createClientLibp2pProxy(
   options: ClientLibp2pProxyOptions,
 ): Promise<ClientLibp2pProxy> {
-  const lan = options.relayMultiaddrs.length === 0;
-  const mode: TunnelTransportMode = options.mode ?? "p2p";
-  const targetPeer = peerIdFromString(options.targetPeerId);
-  const privateKey = options.privateKey ?? (await loadOrCreateLibp2pPrivateKey());
-
-  const changes = new EventTarget();
-  let discovered: string[] = [];
-  const lifetime = new AbortController();
-  const node: Libp2p = await createLibp2p({
-    privateKey,
-    ...(lan
-      ? {
-          connectionGater: { denyDialPeer: (peer) => !peer.equals(targetPeer) },
-          peerDiscovery: [
-            (components) => {
-              const discovery = mdns({ broadcast: false })(components);
-              discovery.addEventListener("peer", ({ detail }: CustomEvent<PeerInfo>) => {
-                if (!detail.id.equals(targetPeer)) return;
-                discovered = detail.multiaddrs.map((addr) =>
-                  addr.encapsulate(`/p2p/${targetPeer}`).toString(),
-                );
-                changes.dispatchEvent(new Event("address"));
-              });
-              return discovery;
-            },
-          ],
-        }
-      : {}),
-    ...(mode === "p2p" && !lan ? { addresses: { listen: ["/ip4/0.0.0.0/tcp/0"] } } : {}),
-    transports: [
-      webSockets(),
-      tcp(),
-      circuitRelayTransport({
-        reservationCompletionTimeout: 10_000,
-      }),
-    ],
-    connectionEncrypters: [noise()],
-    streamMuxers: [yamux()],
-    services: {
-      identify: identify(),
-      identifyPush: identifyPush(),
-      ...(mode === "p2p" && !lan ? { dcutr: dcutr() } : {}),
-    },
-  });
-
-  const selectPreferredConnection = (): Connection | undefined => {
-    const open = node.getConnections(targetPeer).filter((conn) => conn.status === "open");
-    if (open.length === 0) return undefined;
-    if (mode === "p2p") {
-      const direct = open.find((conn) => conn.direct && conn.limits === undefined);
-      if (direct) return direct;
-    }
-    return open[0];
-  };
-
-  const getActiveTransport = (): ActiveProxyTransport => {
-    const open = node.getConnections(targetPeer).filter((conn) => conn.status === "open");
-    if (open.length === 0) return "disconnected";
-    if (mode === "p2p" && open.some((conn) => conn.direct && conn.limits === undefined)) {
-      return "direct";
-    }
-    return "relay";
-  };
-
-  let pendingDial: Promise<Connection> | null = null;
-
-  const ensureConnection = async (): Promise<Connection> => {
-    const existing = selectPreferredConnection();
-    if (existing) return existing;
-
-    if (pendingDial !== null) {
-      return pendingDial;
-    }
-
-    pendingDial = (async () => {
-      let lastError: unknown;
-      if (mode === "p2p") {
-        const direct = [...discovered, ...(options.directMultiaddrs ?? [])]
-          .filter(
-            (address) =>
-              !address.includes("/p2p-circuit") && address.endsWith(`/p2p/${targetPeer}`),
-          )
-          .map((address) => multiaddr(address));
-        if (direct.length) {
-          try {
-            return await node.dial(direct, { signal: AbortSignal.timeout(2000) });
-          } catch (error) {
-            lastError = error;
-          }
-        }
-      }
-      if (lan) {
-        const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(12_000)]);
-        while (!signal.aborted) {
-          const previous = discovered;
-          if (previous.length) {
-            try {
-              return await node.dial(
-                previous.map((addr) => multiaddr(addr)),
-                { signal },
-              );
-            } catch (error) {
-              lastError = error;
-            }
-          }
-          if (previous === discovered)
-            await NodeEvents.EventEmitter.once(changes, "address", { signal });
-        }
-      }
-      for (const relayAddr of options.relayMultiaddrs) {
-        const circuitAddr = buildCircuitTargetMultiaddr(relayAddr, options.targetPeerId);
-        try {
-          return await node.dial(multiaddr(circuitAddr), { signal: AbortSignal.timeout(10_000) });
-        } catch (error) {
-          lastError = error;
-        }
-      }
-      throw lastError instanceof Error
-        ? lastError
-        : new Error(`Unable to reach peer ${options.targetPeerId} via configured relays`);
-    })().finally(() => {
-      pendingDial = null;
-    });
-
-    return pendingDial;
-  };
-
-  const openTargetStream = async (): Promise<Stream> => {
-    const conn = await ensureConnection();
-    return conn.newStream(COVE_TUNNEL_PROTOCOL, {
-      runOnLimitedConnection: true,
-    });
-  };
-
+  const peer = await openEnvironmentPeer(options);
   const prefix = `/.cove-tunnel/${NodeCrypto.randomUUID().replaceAll("-", "")}`;
   const localSockets = new Set<NodeNet.Socket>();
   const allowed = (req: NodeHttp.IncomingMessage) =>
@@ -200,7 +42,8 @@ export async function createClientLibp2pProxy(
       res.writeHead(404).end();
       return;
     }
-    void openTargetStream()
+    void peer
+      .openStream()
       .then((stream) =>
         proxyHttpRequestOverStream({
           stream,
@@ -232,7 +75,8 @@ export async function createClientLibp2pProxy(
       socket.destroy();
       return;
     }
-    void openTargetStream()
+    void peer
+      .openStream()
       .then((stream) =>
         proxyUpgradeOverStream({
           stream,
@@ -255,13 +99,13 @@ export async function createClientLibp2pProxy(
       resolve();
     });
   }).catch(async (error) => {
-    await node.stop();
+    await peer.stop();
     throw error;
   });
 
   const address = server.address() as NodeNet.AddressInfo | null;
   if (!address) {
-    await node.stop();
+    await peer.stop();
     throw new Error("Failed to bind local P2P proxy HTTP server");
   }
 
@@ -273,20 +117,13 @@ export async function createClientLibp2pProxy(
   return {
     httpBaseUrl,
     wsBaseUrl,
-    peerId: node.peerId.toString(),
-    mode,
-    connect: async () => {
-      await ensureConnection();
-      return getActiveTransport();
-    },
-    getActiveTransport,
+    ...peer,
     stop: async () => {
-      lifetime.abort();
       for (const socket of localSockets) socket.destroy();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
-      await node.stop();
+      await peer.stop();
     },
   };
 }

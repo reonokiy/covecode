@@ -24,7 +24,8 @@ import {
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import { registerBrowserTunnelAssets } from "../environment/tunnelUrl.ts";
+import { registerEnvironmentPeer } from "../environment/transport.ts";
+import { vi } from "vite-plus/test";
 import { resolveMediaSource } from "../mediaSource.ts";
 import type * as RpcSession from "../rpc/session.ts";
 import {
@@ -49,10 +50,17 @@ describe("project favicon URL cache", () => {
     }
     const host = "0123456789abcdef0123456789abcdef.cove.invalid";
     const endpoint = `https://${host}/`;
-    const release = registerBrowserTunnelAssets(host, () => "https://app.test/.cove-assets/opaque");
+    const release = registerEnvironmentPeer(host, {
+      fetch: vi.fn(),
+      socket: vi.fn(),
+      resourceUrl: () => "https://app.test/.cove-assets/opaque",
+    });
     try {
       expect(resolveAssetUrl(endpoint, "/api/assets/signed/private-file")).toBe(
         "https://app.test/.cove-assets/opaque",
+      );
+      expect(resolveAssetUrl(endpoint, "/api/assets/signed/private-file", "environment")).toBe(
+        "/api/assets/signed/private-file",
       );
       expect(previewPdfAssetUrl("http://localhost:5000/api/assets/signed/a.pdf", endpoint)).toBe(
         "https://app.test/.cove-assets/opaque",

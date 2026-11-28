@@ -1,4 +1,5 @@
 // @effect-diagnostics globalTimers:off - imperative WebSocket callbacks own and clear their response deadline.
+import { openEnvironmentSocket } from "../environment/transport.ts";
 import { msg } from "gt-i18n";
 import { translatableError } from "../errors/translatable.ts";
 import {
@@ -23,7 +24,7 @@ export function openSpeechStream(input: {
   readonly createSocket?: (url: string) => WebSocket;
 }) {
   input.signal.throwIfAborted();
-  const socket = (input.createSocket ?? ((url) => new WebSocket(url)))(input.url);
+  const socket = (input.createSocket ?? openEnvironmentSocket)(input.url);
   let resolveFinal!: (text: string) => void;
   let rejectFinal!: (error: Error) => void;
   const final = new Promise<string>((resolve, reject) => {

@@ -6,6 +6,7 @@ import { m } from "../../i18n/messages";
 
 interface NativeTunnel {
   open(endpoint: string): Promise<string>;
+  update(url: string, endpoint: string): void;
   close(url: string): void;
 }
 
@@ -37,6 +38,7 @@ export const environmentTunnels = createEnvironmentTunnels({
     const native = requireNativeModule<NativeTunnel>("CoveP2p");
     const httpBaseUrl = await native.open(JSON.stringify(input));
     return {
+      updateAddresses: (hints) => native.update(httpBaseUrl, JSON.stringify(hints)),
       httpBaseUrl,
       wsBaseUrl: httpBaseUrl.replace(/^http:/u, "ws:") + "ws",
       close: () => native.close(httpBaseUrl),

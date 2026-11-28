@@ -23,6 +23,7 @@ import {
 } from "./httpBridge.ts";
 import {
   COVE_TUNNEL_PROTOCOL,
+  HTTP_OVER_LIBP2P,
   COVE_TUNNEL_REGISTER_PROTOCOL,
   loadOrCreateLibp2pPrivateKey,
   readBoundedJsonLine,
@@ -291,7 +292,7 @@ export async function createRelayLibp2pNode(
     const entry = registrations.get(endpointKey);
     if (entry?.connection.status === "open") {
       try {
-        return await entry.connection.newStream(COVE_TUNNEL_PROTOCOL, {
+        return await entry.connection.newStream([HTTP_OVER_LIBP2P, COVE_TUNNEL_PROTOCOL], {
           runOnLimitedConnection: true,
           signal: signalForAttempt(),
         });
@@ -309,7 +310,7 @@ export async function createRelayLibp2pNode(
       const signal = signalForAttempt();
       try {
         const connection = await node.dial(candidates, { signal, force });
-        return await connection.newStream(COVE_TUNNEL_PROTOCOL, {
+        return await connection.newStream([HTTP_OVER_LIBP2P, COVE_TUNNEL_PROTOCOL], {
           runOnLimitedConnection: true,
           signal,
         });

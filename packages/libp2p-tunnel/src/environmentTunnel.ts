@@ -1,4 +1,5 @@
-import * as NodeNet from "node:net";
+import type * as NodeHttp from "node:http";
+import { environmentHttpIngress, type EnvironmentHttpTarget } from "./environmentHttp.ts";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import {
@@ -23,7 +24,7 @@ import {
   COVE_TUNNEL_REGISTER_PROTOCOL,
   isAllowedLoopbackHost,
   loadOrCreateLibp2pPrivateKey,
-  pipeStreamAndSocket,
+  HTTP_OVER_LIBP2P,
   readBoundedJsonLine,
   writeJsonLine,
 } from "./protocols.ts";
@@ -38,20 +39,18 @@ export interface EnvironmentTunnelStatusEvent {
   readonly error?: string;
 }
 
-export interface EnvironmentLibp2pTunnelOptions {
+export type EnvironmentLibp2pTunnelOptions = EnvironmentHttpTarget & {
   readonly relayMultiaddrs: readonly string[];
   readonly endpointId: string;
   readonly endpointKey: string;
   readonly connectorToken: string;
-  readonly localHost: string;
-  readonly localPort: number;
   readonly enableP2p?: boolean;
   readonly keyPath?: string;
   readonly privateKey?: PrivateKey;
   readonly reconnectBaseDelayMs?: number;
   readonly reconnectMaxDelayMs?: number;
   readonly onStatusChange?: (status: EnvironmentTunnelStatusEvent) => void;
-}
+};
 
 export interface EnvironmentLibp2pTunnel {
   readonly peerId: string;
@@ -74,37 +73,20 @@ export class TunnelRegistrationUnauthorizedError extends Error {
   }
 }
 
-async function handleEnvironmentStreams(node: Libp2p, localHost: string, localPort: number) {
-  await node.handle(
-    COVE_TUNNEL_PROTOCOL,
-    (stream) => {
-      const targetSocket = NodeNet.connect({
-        host: localHost,
-        port: localPort,
-      });
-      pipeStreamAndSocket(stream, targetSocket);
-    },
-    {
-      runOnLimitedConnection: true,
-      maxInboundStreams: 256,
-      maxOutboundStreams: 256,
-    },
-  );
-
+async function handleEnvironmentStreams(node: Libp2p, target: EnvironmentHttpTarget) {
+  const ingress = environmentHttpIngress(target);
+  const limits = { runOnLimitedConnection: true, maxInboundStreams: 256, maxOutboundStreams: 256 };
+  await node.handle([HTTP_OVER_LIBP2P, COVE_TUNNEL_PROTOCOL], ingress.accept, limits);
   await node.handle(
     BROWSER_TUNNEL_PROTOCOL,
-    (stream) => serveBrowserStream(stream, localHost, localPort),
-    {
-      runOnLimitedConnection: true,
-      maxInboundStreams: 256,
-      maxOutboundStreams: 256,
-    },
+    (stream, connection) => serveBrowserStream(stream, () => ingress.connect(connection)),
+    limits,
   );
 }
 
 export async function createLanEnvironmentTunnel(options: {
   readonly bindHost: string;
-  readonly localPort: number;
+  readonly server: NodeHttp.Server;
   readonly keyPath: string;
 }) {
   const listenHost = options.bindHost === "::" ? "0.0.0.0" : options.bindHost;
@@ -130,11 +112,7 @@ export async function createLanEnvironmentTunnel(options: {
     services: { identify: identify() },
   });
   try {
-    await handleEnvironmentStreams(
-      node,
-      options.bindHost === "::" ? "::1" : listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost,
-      options.localPort,
-    );
+    await handleEnvironmentStreams(node, options);
   } catch (error) {
     await node.stop();
     throw error;
@@ -182,7 +160,7 @@ export async function createLanEnvironmentTunnel(options: {
 export async function createEnvironmentLibp2pTunnel(
   options: EnvironmentLibp2pTunnelOptions,
 ): Promise<EnvironmentLibp2pTunnel> {
-  if (!isAllowedLoopbackHost(options.localHost)) {
+  if ("localHost" in options && !isAllowedLoopbackHost(options.localHost)) {
     throw new Error(
       `Refusing to forward libp2p tunnel to non-loopback host "${options.localHost}"`,
     );
@@ -267,7 +245,7 @@ export async function createEnvironmentLibp2pTunnel(
     });
   };
 
-  await handleEnvironmentStreams(node, options.localHost, options.localPort);
+  await handleEnvironmentStreams(node, options);
 
   const dialAndRegister = async (addresses: readonly string[]): Promise<Connection> => {
     let lastError: unknown;

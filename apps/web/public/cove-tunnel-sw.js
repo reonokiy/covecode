@@ -46,6 +46,7 @@ async function resource(event, owner, target) {
   const { signal } = event.request;
   let pending;
   let timer;
+  let eventStream = false;
   const finish = () => {
     clearTimeout(timer);
     pending = undefined;
@@ -60,7 +61,7 @@ async function resource(event, owner, target) {
   const next = () =>
     new Promise((resolve, reject) => {
       pending = reject;
-      timer = setTimeout(cancel, 30_000);
+      if (!eventStream) timer = setTimeout(cancel, 30_000);
       port.onmessageerror = cancel;
       port.onmessage = ({ data }) => {
         clearTimeout(timer);
@@ -83,7 +84,14 @@ async function resource(event, owner, target) {
       ...target,
       method: event.request.method,
       headers: [...event.request.headers].filter(([name]) =>
-        ["accept", "range", "if-range", "if-none-match", "if-modified-since"].includes(name),
+        [
+          "accept",
+          "range",
+          "if-range",
+          "if-none-match",
+          "if-modified-since",
+          "last-event-id",
+        ].includes(name),
       ),
     },
     [port2],
@@ -97,6 +105,7 @@ async function resource(event, owner, target) {
     ),
   );
   const mime = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  eventStream = mime === "text/event-stream";
   const policy = new Headers(meta.headers).get("content-security-policy");
   if (policy) headers.set("content-security-policy", policy);
   if (mime !== "application/pdf") {

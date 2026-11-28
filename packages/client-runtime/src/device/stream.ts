@@ -1,5 +1,6 @@
 // @effect-diagnostics globalFetch:off globalTimers:off - This browser and WebView transport runs without an Effect runtime.
 
+import { fetchEnvironment, openEnvironmentSocket } from "../environment/transport.ts";
 import {
   createDuoControl,
   type DuoCommand,
@@ -730,7 +731,7 @@ export function createDeviceStreamClient(
     let retryDetail: string | undefined;
     let leaseEnd: string | undefined;
     try {
-      const response = await fetch(httpUrl(videoPath), {
+      const response = await fetchEnvironment(httpUrl(videoPath), {
         signal: videoController.signal,
         credentials: access.credentials ? "include" : "same-origin",
       });
@@ -868,7 +869,7 @@ export function createDeviceStreamClient(
     primeController = controller;
     const timeout = setTimeout(() => controller.abort(), 2_000);
     try {
-      const response = await fetch(httpUrl(`/helper/${device}/stream.mjpeg`), {
+      const response = await fetchEnvironment(httpUrl(`/helper/${device}/stream.mjpeg`), {
         signal: controller.signal,
         credentials: access.credentials ? "include" : "same-origin",
       });
@@ -892,7 +893,7 @@ export function createDeviceStreamClient(
     const probe = new AbortController();
     const timeout = setTimeout(() => probe.abort(), TRANSPORT_PROBE_TIMEOUT_MS);
     try {
-      const response = await fetch(httpUrl(`/api?device=${device}`), {
+      const response = await fetchEnvironment(httpUrl(`/api?device=${device}`), {
         signal: probe.signal,
         credentials: access.credentials ? "include" : "same-origin",
       });
@@ -919,7 +920,7 @@ export function createDeviceStreamClient(
     current.video.srcObject = null;
     current.video.remove();
     // Releases the capture session; best effort because the page may be unloading.
-    void fetch(webRtcUrl("close"), {
+    void fetchEnvironment(webRtcUrl("close"), {
       method: "POST",
       keepalive: true,
       headers: { "content-type": "application/json" },
@@ -1041,7 +1042,7 @@ export function createDeviceStreamClient(
         iceGatheringDeadlineMs = Math.min(iceGatheringDeadlineMs * 2, ICE_GATHERING_MAX_TIMEOUT_MS);
         return retry(resolve(msg("Device stream found no network candidates yet. Retrying…")));
       }
-      const response = await fetch(webRtcUrl("offer"), {
+      const response = await fetchEnvironment(webRtcUrl("offer"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1137,7 +1138,7 @@ export function createDeviceStreamClient(
     const session = generation;
     if (!serveSimOnly) await primeIosHelper(session);
     if (stopped || generation !== session) return;
-    const ws = new WebSocket(wsUrl(`/helper/ws?device=${device}`));
+    const ws = openEnvironmentSocket(wsUrl(`/helper/ws?device=${device}`));
     ws.binaryType = "arraybuffer";
     socket = ws;
     iosInputAdmitted = false;
@@ -1228,7 +1229,7 @@ export function createDeviceStreamClient(
   /** `inputOnly` keeps a socket for input beside a WebRTC feed, so its reconnects leave video alone. */
   const connectAndroid = (inputOnly = false) => {
     if (stopped) return;
-    const ws = new WebSocket(
+    const ws = openEnvironmentSocket(
       wsUrl(`/ws?device=${device}&${inputOnly ? "video=0" : "frame-meta=1"}`),
     );
     ws.binaryType = "arraybuffer";

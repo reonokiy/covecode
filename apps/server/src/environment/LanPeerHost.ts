@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Path from "effect/Path";
-import { HttpServer } from "effect/http";
+import { EnvironmentHttpServer } from "./EnvironmentHttpServer.ts";
 import * as NodeNet from "node:net";
 import { ServerConfig } from "../config.ts";
 import { allowsRemoteClients } from "../policy/managedLimits.ts";
@@ -36,11 +36,10 @@ export const layer = Layer.effect(
       return { getPeer: () => undefined };
     }
     const path = yield* Path.Path;
-    const { address } = yield* HttpServer.HttpServer;
-    if (address._tag === "UnixPathAddress") return { getPeer: () => undefined };
+    const server = yield* EnvironmentHttpServer;
     const options = {
       bindHost,
-      localPort: address.port,
+      server,
       keyPath: path.join(config.stateDir, "libp2p-lan.key"),
     };
     return yield* Effect.acquireRelease(

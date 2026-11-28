@@ -7,6 +7,8 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
+    "./desktop": "./src/desktopStream.ts",
+    "./http-client": "./src/peerHttpClient.ts",
     "./proxy": "./src/p2pProxy.ts",
     "./browser": {
       "types": "./src/browser.ts",
@@ -34,6 +36,7 @@
     "@multiformats/multiaddr": "catalog:",
     "libp2p": "catalog:",
     "multicast-dns": "catalog:",
+    "race-signal": "2.0.2",
     "ws": "catalog:"
   },
   "devDependencies": {

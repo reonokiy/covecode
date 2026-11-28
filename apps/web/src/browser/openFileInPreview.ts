@@ -6,7 +6,6 @@ import type {
   PreviewSessionSnapshot,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { tunnelResourceUrl } from "@t3tools/client-runtime/environment";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import {
   type AtomCommandResult,
@@ -154,13 +153,11 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
     return AsyncResult.failure(assetResult.cause);
   }
   const { relativeUrl } = assetResult.value;
-  // A server-side browser opens the signed path on the environment that minted it.
-  const assetUrl =
-    previewRuntimeFor(hostRef.environmentId) === "server" &&
-    relativeUrl.startsWith("/api/assets/") &&
-    tunnelResourceUrl(input.httpBaseUrl)
-      ? relativeUrl
-      : resolveAssetUrl(input.httpBaseUrl, relativeUrl);
+  const assetUrl = resolveAssetUrl(
+    input.httpBaseUrl,
+    relativeUrl,
+    previewRuntimeFor(hostRef.environmentId) === "server" ? "environment" : "client",
+  );
   if (assetUrl === null) {
     return AsyncResult.failure(
       Cause.die(new Error("The environment returned an invalid asset URL.")),

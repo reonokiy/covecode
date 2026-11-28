@@ -19,21 +19,11 @@ export const environmentTunnels = createEnvironmentTunnels({
     localStorage.setItem(key, peerId);
   },
   async open(input) {
-    const bridge = window.desktopBridge;
-    if (bridge) {
-      const { openEnvironmentTunnel, closeEnvironmentTunnel } = bridge;
-      if (!openEnvironmentTunnel || !closeEnvironmentTunnel)
-        throw new Error("Desktop tunnel is unavailable");
-      const url = await openEnvironmentTunnel(input);
-      return {
-        httpBaseUrl: url + "/",
-        wsBaseUrl: url.replace(/^http:/u, "ws:") + "/ws",
-        close: () => {
-          void closeEnvironmentTunnel(url);
-        },
-      };
-    }
     const { openWebPeer } = await import("./browserTunnel");
+    if (window.desktopBridge) {
+      const { openDesktopPeer } = await import("./desktopPeer");
+      return openWebPeer(input, openDesktopPeer);
+    }
     return openWebPeer(input);
   },
 });

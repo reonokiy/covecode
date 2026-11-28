@@ -23,6 +23,14 @@ public final class CoveP2pModule: Module {
       self.tunnels.insert(url)
       return url
     }
+    Function("update") { (url: String, endpoint: String) in
+      self.lock.lock()
+      defer { self.lock.unlock() }
+      guard self.tunnels.contains(url),
+            url.withCString({ handle in endpoint.withCString { cove_tunnel_update(handle, $0) } }) else {
+        throw NSError(domain: "CoveP2p", code: 2)
+      }
+    }
     Function("close") { (url: String) in
       self.lock.lock()
       defer { self.lock.unlock() }

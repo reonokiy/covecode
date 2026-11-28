@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- The connector fixture needs a Node HTTP server without a TCP listener.
+import * as NodeHttp from "node:http";
+import { EnvironmentHttpServer } from "../environment/EnvironmentHttpServer.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
@@ -59,6 +62,7 @@ function buildRuntime(options: {
   readonly policy?: Parameters<typeof ManagedPolicy.layerTest>[0];
 }) {
   const deps = Layer.mergeAll(
+    Layer.succeed(EnvironmentHttpServer, NodeHttp.createServer()),
     ManagedPolicy.layerTest(options.policy),
     Layer.succeed(HttpClient.HttpClient, options.httpClient ?? unusedHttpClient),
     options.secretStoreLayer ?? defaultSecretStoreLayer,
@@ -168,8 +172,7 @@ describe("CloudManagedEndpointRuntime (libp2p)", () => {
         expect(Option.isSome(yield* Fiber.join(connectedEvent))).toBe(true);
         expect(Option.isSome(yield* Fiber.join(readinessEvent))).toBe(true);
         expect(created).toHaveLength(1);
-        expect(created[0]?.options.localHost).toBe("127.0.0.1");
-        expect(created[0]?.options.localPort).toBe(4123);
+        expect(created[0]?.options).toHaveProperty("server");
         expect(created[0]?.options.enableP2p).toBe(true);
 
         const facts = yield* runtime.inspectConnector;

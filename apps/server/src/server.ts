@@ -31,6 +31,7 @@ import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as NonBlockingSpawner from "./process/NonBlockingSpawner.ts";
 import * as KeepAwake from "./background/KeepAwake.ts";
+import { EnvironmentHttpServer } from "./environment/EnvironmentHttpServer.ts";
 import * as LanPeerHost from "./environment/LanPeerHost.ts";
 import * as ServerConfig from "./config.ts";
 import { withRootRequestSpans, withUntracedRequests } from "./http.ts";
@@ -370,28 +371,20 @@ const layerHttpServer = Layer.unwrap(
       privateNetworkOnly: config.privateNetworkOnly,
     });
     yield* ManagedLimits.closeTailscaleServeTo(policy, { host: bindHost, port: config.port });
-    const runSync = Effect.runSyncWith(yield* Effect.context<never>());
-    return NodeHttpServer.layer(
-      () => {
-        const server = rejectRequestsUntilServing(
-          keepIdleConnections(guardHttpResponseWriteErrors(NodeHttp.createServer())),
-        );
-        if (config.privateNetworkOnly) {
-          runSync(closeNonPrivateNetworkConnections(server));
-        }
-        return server;
-      },
-      {
-        host: bindHost,
-        port: config.port,
-        gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
-        // Context takeover stays enabled (ws default) so the compression
-        // window is shared across frames — that also makes small frames cheap
-        // to compress, so no size threshold is set (ws only honors
-        // `threshold` when context takeover is disabled).
-        websocket: { perMessageDeflate: true },
-      },
-    ).pipe(Layer.merge(layerSpawner));
+    const server = rejectRequestsUntilServing(
+      keepIdleConnections(guardHttpResponseWriteErrors(NodeHttp.createServer())),
+    );
+    if (config.privateNetworkOnly) yield* closeNonPrivateNetworkConnections(server);
+    return NodeHttpServer.layer(() => server, {
+      host: bindHost,
+      port: config.port,
+      gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
+      // Context takeover stays enabled (ws default) so the compression
+      // window is shared across frames — that also makes small frames cheap
+      // to compress, so no size threshold is set (ws only honors
+      // `threshold` when context takeover is disabled).
+      websocket: { perMessageDeflate: true },
+    }).pipe(Layer.merge(layerSpawner), Layer.merge(Layer.succeed(EnvironmentHttpServer, server)));
   }),
 ).pipe(
   Layer.provide(ManagedPolicy.layer),
